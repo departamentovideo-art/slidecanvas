@@ -270,13 +270,24 @@ function applyZoomTransform(){
 }
 
 /* ─── Coordinate mapping: screen → slide pixels ─────
-   Accounts for wrapper offset, zoom, and pan.        */
+   zoomWrap uses transform-origin:center center, so
+   scale(zoom) expands from the wrapper's center.
+   Then translate(panX/zoom, panY/zoom) shifts it.
+
+   Inverse:
+   1. screen pos relative to wrapper top-left
+   2. shift origin to wrapper center
+   3. undo zoom (divide by zoom)
+   4. undo pan (subtract panX/zoom, panY/zoom)
+   5. shift origin back to top-left
+   6. scale display px → canvas px                    */
 function screenToCanvas(sx,sy){
-  // Position relative to wrapper origin (before transform)
-  const cx=(sx-slideOffX)/zoom - panX/zoom;
-  const cy=(sy-slideOffY)/zoom - panY/zoom;
-  // Scale from display pixels to canvas pixels
-  return {x:cx*SW/slideDispW, y:cy*SH/slideDispH};
+  const cx=slideOffX+slideDispW/2; // wrapper center X on screen
+  const cy=slideOffY+slideDispH/2; // wrapper center Y on screen
+  // Undo CSS transform: scale from center + translate
+  const lx=(sx-cx)/zoom - panX/zoom + slideDispW/2;
+  const ly=(sy-cy)/zoom - panY/zoom + slideDispH/2;
+  return {x:lx*SW/slideDispW, y:ly*SH/slideDispH};
 }
 
 /* ─── Slide model ────────────────────────────────── */
