@@ -4,306 +4,218 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>SlideCanvas</title>
+<!-- PDF.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- JSZip (needed for PPTX parsing) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap');
-
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
 :root {
-  --glass: rgba(12,12,16,0.82);
-  --glass-border: rgba(255,255,255,0.10);
+  --glass: rgba(12,12,16,0.85);
+  --gb: rgba(255,255,255,0.10);
   --accent: #e8c87a;
   --danger: #e87a7a;
   --text: #f0efe8;
-  --text-dim: rgba(240,239,232,0.45);
+  --dim: rgba(240,239,232,0.45);
+}
+html, body { width:100%; height:100%; overflow:hidden; background:#000; font-family:'DM Sans',system-ui,sans-serif; color:var(--text); touch-action:none; -webkit-user-select:none; user-select:none; }
+
+#sC, #dC { position:fixed; top:0; left:0; width:100vw; height:100vh; display:block; }
+#dC { cursor:crosshair; z-index:1; touch-action:none; }
+
+#ui { position:fixed; inset:0; z-index:10; pointer-events:none; opacity:0; transition:opacity .3s; }
+#ui.vis { opacity:1; }
+#ui > * { pointer-events:auto; }
+
+#topBar {
+  position:absolute; top:20px; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:4px; padding:5px 9px;
+  background:var(--glass); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--gb); border-radius:40px; white-space:nowrap;
+}
+#botBar {
+  position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+  display:flex; align-items:center; gap:3px; padding:6px 10px;
+  background:var(--glass); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--gb); border-radius:40px;
 }
 
-html, body {
-  width: 100%; height: 100%;
-  overflow: hidden;
-  background: #000;
-  font-family: 'DM Sans', sans-serif;
-  color: var(--text);
-  touch-action: none;
-  -webkit-user-select: none;
-  user-select: none;
+#drawer {
+  position:absolute; top:0; left:0; bottom:0; width:155px;
+  background:var(--glass); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border-right:1px solid var(--gb);
+  display:flex; flex-direction:column; padding:72px 7px 16px; gap:7px;
+  overflow-y:auto; overflow-x:hidden;
+  transform:translateX(-100%); transition:transform .3s cubic-bezier(.4,0,.2,1);
 }
+#drawer.open { transform:translateX(0); }
+#drawer::-webkit-scrollbar { width:2px; }
+#drawer::-webkit-scrollbar-thumb { background:rgba(255,255,255,.15); border-radius:1px; }
 
-/* ── Slide fills screen ──────────────────────────────── */
-#slide-canvas, #draw-canvas {
-  position: fixed; top: 0; left: 0;
-  width: 100vw; height: 100vh;
-  display: block;
-}
-#draw-canvas { cursor: crosshair; z-index: 1; touch-action: none; }
+.thi { position:relative; border-radius:5px; overflow:hidden; border:2px solid transparent; cursor:pointer; flex-shrink:0; transition:border-color .15s; }
+.thi.act { border-color:var(--accent); }
+.thi canvas { display:block; width:100%; border-radius:3px; }
+.thn { position:absolute; bottom:2px; right:4px; font-size:9px; color:rgba(255,255,255,.4); }
+.thd { position:absolute; top:2px; right:2px; width:15px; height:15px; background:rgba(0,0,0,.7); border:none; border-radius:50%; color:#fff; font-size:10px; display:flex; align-items:center; justify-content:center; cursor:pointer; opacity:0; transition:opacity .15s; }
+.thi:hover .thd { opacity:1; }
 
-/* ── UI layer ────────────────────────────────────────── */
-#ui {
-  position: fixed; inset: 0;
-  z-index: 10;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity .35s ease;
-}
-#ui.visible { opacity: 1; }
-#ui > * { pointer-events: auto; }
+#dAdd { display:flex; align-items:center; justify-content:center; height:30px; border-radius:7px; border:1.5px dashed rgba(255,255,255,.18); background:transparent; color:var(--dim); font-size:18px; cursor:pointer; flex-shrink:0; transition:border-color .15s,color .15s; }
+#dAdd:hover { border-color:var(--accent); color:var(--accent); }
 
-/* ── Top bar ─────────────────────────────────────────── */
-#top-bar {
-  position: absolute;
-  top: 20px; left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 5px;
-  padding: 6px 10px;
-  background: var(--glass);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid var(--glass-border);
-  border-radius: 40px;
-  white-space: nowrap;
-}
+.btn { display:flex; align-items:center; justify-content:center; width:34px; height:34px; border:none; border-radius:9px; background:transparent; color:var(--dim); font-size:15px; cursor:pointer; transition:background .15s,color .15s,transform .1s; -webkit-tap-highlight-color:transparent; flex-shrink:0; }
+.btn:hover { background:rgba(255,255,255,.1); color:var(--text); }
+.btn.act { background:var(--accent); color:#1a1400; }
+.btn:active { transform:scale(.9); }
+.btn.red { color:var(--danger); }
+.btn.red:hover { background:rgba(232,122,122,.13); }
 
-/* ── Bottom toolbar ──────────────────────────────────── */
-#bottom-bar {
-  position: absolute;
-  bottom: 24px; left: 50%; transform: translateX(-50%);
-  display: flex; align-items: center; gap: 4px;
-  padding: 7px 12px;
-  background: var(--glass);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid var(--glass-border);
-  border-radius: 40px;
-}
+.sep { width:1px; height:22px; background:var(--gb); margin:0 2px; flex-shrink:0; }
+.cnt { font-size:11px; color:var(--dim); min-width:38px; text-align:center; font-variant-numeric:tabular-nums; }
 
-/* ── Thumbnail drawer ────────────────────────────────── */
-#thumb-drawer {
-  position: absolute; top: 0; left: 0; bottom: 0;
-  width: 158px;
-  background: var(--glass);
-  backdrop-filter: blur(24px) saturate(1.4);
-  -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  border-right: 1px solid var(--glass-border);
-  display: flex; flex-direction: column;
-  padding: 76px 8px 20px;
-  gap: 8px;
-  overflow-y: auto; overflow-x: hidden;
-  transform: translateX(-100%);
-  transition: transform .3s cubic-bezier(.4,0,.2,1);
-}
-#thumb-drawer.open { transform: translateX(0); }
-#thumb-drawer::-webkit-scrollbar { width: 3px; }
-#thumb-drawer::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 2px; }
+#pal { display:flex; gap:3px; align-items:center; padding:0 2px; }
+.cd { width:18px; height:18px; border-radius:50%; border:2px solid transparent; cursor:pointer; flex-shrink:0; transition:transform .15s,border-color .15s; }
+.cd:hover { transform:scale(1.25); }
+.cd.act { border-color:#fff; transform:scale(1.2); }
 
-.thumb-item {
-  position: relative; border-radius: 6px; overflow: hidden;
-  border: 2px solid transparent; cursor: pointer; flex-shrink: 0;
-  transition: border-color .15s, transform .15s;
-}
-.thumb-item:hover { transform: scale(1.04); }
-.thumb-item.active { border-color: var(--accent); }
-.thumb-item canvas { display: block; width: 100%; border-radius: 4px; }
-.thumb-num {
-  position: absolute; bottom: 3px; right: 5px;
-  font-size: 10px; color: rgba(255,255,255,.4);
-  font-variant-numeric: tabular-nums;
-}
-.thumb-del {
-  position: absolute; top: 3px; right: 3px;
-  width: 17px; height: 17px;
-  background: rgba(0,0,0,.7); border: none; border-radius: 50%;
-  color: #fff; font-size: 11px;
-  display: flex; align-items: center; justify-content: center;
-  cursor: pointer; opacity: 0; transition: opacity .15s;
-}
-.thumb-item:hover .thumb-del { opacity: 1; }
+#szW { display:flex; align-items:center; gap:4px; padding:0 3px; }
+#szW input[type=range] { -webkit-appearance:none; width:56px; height:3px; background:rgba(255,255,255,.2); border-radius:2px; outline:none; cursor:pointer; }
+#szW input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:12px; height:12px; border-radius:50%; background:var(--accent); cursor:pointer; }
+#szPv { width:16px; height:16px; display:flex; align-items:center; justify-content:center; }
+#szDot { border-radius:50%; background:var(--text); }
 
-#drawer-add {
-  display: flex; align-items: center; justify-content: center;
-  height: 32px; border-radius: 8px;
-  border: 1.5px dashed rgba(255,255,255,.18);
-  background: transparent; color: var(--text-dim);
-  font-size: 20px; cursor: pointer;
-  transition: border-color .15s, color .15s; flex-shrink: 0;
+#bgP {
+  position:fixed; bottom:74px; left:50%; transform:translateX(-50%) translateY(6px);
+  background:var(--glass); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--gb); border-radius:14px;
+  padding:10px 12px; display:flex; gap:6px; flex-wrap:wrap; max-width:260px;
+  z-index:20; opacity:0; pointer-events:none; transition:opacity .2s,transform .2s;
 }
-#drawer-add:hover { border-color: var(--accent); color: var(--accent); }
+#bgP.open { opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0); }
+.bgsw { width:28px; height:28px; border-radius:7px; border:2px solid transparent; cursor:pointer; transition:transform .15s,border-color .15s; flex-shrink:0; }
+.bgsw:hover { transform:scale(1.15); }
+.bgsw.act { border-color:#fff; }
 
-/* ── Buttons ─────────────────────────────────────────── */
-.btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 36px; height: 36px;
-  border: none; border-radius: 10px;
-  background: transparent; color: var(--text-dim);
-  font-size: 16px; cursor: pointer;
-  transition: background .15s, color .15s, transform .1s;
-  -webkit-tap-highlight-color: transparent; flex-shrink: 0;
+/* Loading overlay */
+#loadingOverlay {
+  position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:100;
+  display:none; flex-direction:column; align-items:center; justify-content:center; gap:16px;
 }
-.btn:hover { background: rgba(255,255,255,.09); color: var(--text); }
-.btn.active { background: var(--accent); color: #1a1400; }
-.btn:active { transform: scale(.9); }
-.btn.red { color: var(--danger); }
-.btn.red:hover { background: rgba(232,122,122,.13); }
+#loadingOverlay.show { display:flex; }
+#loadBar { width:200px; height:4px; background:rgba(255,255,255,.15); border-radius:2px; overflow:hidden; }
+#loadFill { height:100%; background:var(--accent); border-radius:2px; transition:width .2s; width:0%; }
+#loadMsg { font-size:13px; color:var(--dim); }
 
-.sep { width: 1px; height: 24px; background: var(--glass-border); margin: 0 2px; flex-shrink: 0; }
-.counter { font-size: 11px; color: var(--text-dim); min-width: 42px; text-align: center; font-variant-numeric: tabular-nums; }
-
-/* ── Palette ─────────────────────────────────────────── */
-#palette { display: flex; gap: 4px; align-items: center; padding: 0 2px; }
-.cdot {
-  width: 20px; height: 20px; border-radius: 50%;
-  border: 2px solid transparent; cursor: pointer; flex-shrink: 0;
-  transition: transform .15s, border-color .15s;
-}
-.cdot:hover { transform: scale(1.25); }
-.cdot.active { border-color: #fff; transform: scale(1.2); }
-
-/* ── Size slider ─────────────────────────────────────── */
-#size-wrap { display: flex; align-items: center; gap: 5px; padding: 0 4px; }
-#size-wrap input[type=range] {
-  -webkit-appearance: none; width: 62px; height: 3px;
-  background: rgba(255,255,255,.2); border-radius: 2px; outline: none; cursor: pointer;
-}
-#size-wrap input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%;
-  background: var(--accent); cursor: pointer;
-}
-#sz-preview { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; }
-#sz-dot { border-radius: 50%; background: var(--text); transition: width .1s, height .1s; }
-
-/* ── Background swatches ─────────────────────────────── */
-#bg-panel {
-  position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%) translateY(6px);
-  background: var(--glass); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--glass-border); border-radius: 16px;
-  padding: 12px 14px; display: flex; gap: 7px; flex-wrap: wrap; max-width: 290px;
-  z-index: 20; opacity: 0; pointer-events: none;
-  transition: opacity .2s, transform .2s;
-}
-#bg-panel.open { opacity: 1; pointer-events: auto; transform: translateX(-50%) translateY(0); }
-.bg-sw {
-  width: 32px; height: 32px; border-radius: 8px;
-  border: 2px solid transparent; cursor: pointer;
-  transition: transform .15s, border-color .15s; flex-shrink: 0;
-}
-.bg-sw:hover { transform: scale(1.15); }
-.bg-sw.active { border-color: #fff; }
-
-/* ── Hint ────────────────────────────────────────────── */
-#hint {
-  position: fixed; bottom: 36px; left: 50%; transform: translateX(-50%);
-  font-size: 11px; color: rgba(255,255,255,.22); pointer-events: none;
-  z-index: 5; transition: opacity .5s; letter-spacing: .04em;
-}
-#hint.gone { opacity: 0; }
-
-/* ── Toast ───────────────────────────────────────────── */
-#toast {
-  position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
-  background: rgba(12,12,16,.9); border: 1px solid var(--glass-border);
-  color: var(--text); padding: 7px 18px; border-radius: 20px;
-  font-size: 13px; z-index: 200; opacity: 0; pointer-events: none;
-  transition: opacity .3s; backdrop-filter: blur(12px); white-space: nowrap;
-}
-#toast.show { opacity: 1; }
+#hint { position:fixed; bottom:10px; left:50%; transform:translateX(-50%); font-size:10px; color:rgba(255,255,255,.2); pointer-events:none; z-index:5; transition:opacity .5s; white-space:nowrap; }
+#hint.gone { opacity:0; }
+#toast { position:fixed; bottom:76px; left:50%; transform:translateX(-50%); background:rgba(10,10,14,.92); border:1px solid var(--gb); color:var(--text); padding:6px 16px; border-radius:18px; font-size:12px; z-index:200; opacity:0; pointer-events:none; transition:opacity .3s; white-space:nowrap; }
+#toast.show { opacity:1; }
 </style>
 </head>
 <body>
 
-<canvas id="slide-canvas"></canvas>
-<canvas id="draw-canvas"></canvas>
+<canvas id="sC"></canvas>
+<canvas id="dC"></canvas>
 
 <div id="ui">
-  <!-- Top bar -->
-  <div id="top-bar">
-    <button class="btn" id="btn-thumbs">⊞</button>
+  <div id="topBar">
+    <button class="btn" id="bTh" title="Diapositivas">⊞</button>
     <div class="sep"></div>
-    <button class="btn" id="btn-prev">‹</button>
-    <span class="counter" id="counter">1 / 1</span>
-    <button class="btn" id="btn-next">›</button>
+    <button class="btn" id="bPrev">‹</button>
+    <span class="cnt" id="cnt">1 / 1</span>
+    <button class="btn" id="bNext">›</button>
     <div class="sep"></div>
-    <button class="btn" id="btn-add" style="font-size:18px">＋</button>
+    <button class="btn" id="bAdd" style="font-size:17px" title="Nueva diapositiva">＋</button>
     <div class="sep"></div>
-    <button class="btn" id="btn-img" title="Insertar imagen">🖼</button>
-    <button class="btn" id="btn-bg" title="Fondo">🎨</button>
+    <!-- Import buttons -->
+    <button class="btn" id="bPdf" title="Importar PDF">📄</button>
+    <button class="btn" id="bPptx" title="Importar PowerPoint">📊</button>
     <div class="sep"></div>
-    <button class="btn" id="btn-fs" title="Pantalla completa">⛶</button>
-    <input type="file" id="file-img" accept="image/*" style="display:none">
-    <input type="file" id="file-bg" accept="image/*" style="display:none">
+    <button class="btn" id="bImg" title="Insertar imagen">🖼</button>
+    <button class="btn" id="bBg" title="Fondo">🎨</button>
+    <div class="sep"></div>
+    <button class="btn" id="bFs" title="Pantalla completa">⛶</button>
+    <input type="file" id="fPdf" accept=".pdf" style="display:none">
+    <input type="file" id="fPptx" accept=".pptx,.ppt" style="display:none">
+    <input type="file" id="fImg" accept="image/*" style="display:none">
+    <input type="file" id="fBg" accept="image/*" style="display:none">
   </div>
 
-  <!-- Bottom bar -->
-  <div id="bottom-bar">
-    <button class="btn active" id="tool-pen">✏️</button>
-    <button class="btn" id="tool-marker">🖊</button>
-    <button class="btn" id="tool-eraser">⬜</button>
-    <button class="btn" id="tool-laser">🔴</button>
+  <div id="botBar">
+    <button class="btn act" id="tPen">✏️</button>
+    <button class="btn" id="tMark">🖊</button>
+    <button class="btn" id="tErase">⬜</button>
+    <button class="btn" id="tLaser">🔴</button>
     <div class="sep"></div>
-    <div id="palette"></div>
+    <div id="pal"></div>
     <div class="sep"></div>
-    <div id="size-wrap">
-      <div id="sz-preview"><div id="sz-dot" style="width:5px;height:5px"></div></div>
-      <input type="range" id="size-slider" min="1" max="40" value="5">
+    <div id="szW">
+      <div id="szPv"><div id="szDot" style="width:5px;height:5px"></div></div>
+      <input type="range" id="szR" min="1" max="40" value="5">
     </div>
     <div class="sep"></div>
-    <button class="btn" id="btn-undo">↩</button>
-    <button class="btn red" id="btn-clear">🗑</button>
+    <button class="btn" id="bUndo">↩</button>
+    <button class="btn red" id="bClr">🗑</button>
   </div>
 
-  <!-- Thumbnail drawer -->
-  <div id="thumb-drawer">
-    <button id="drawer-add">＋</button>
+  <div id="drawer">
+    <button id="dAdd">＋</button>
   </div>
 </div>
 
-<div id="bg-panel"></div>
+<div id="bgP"></div>
+
+<!-- Loading overlay for PDF/PPTX import -->
+<div id="loadingOverlay">
+  <div id="loadBar"><div id="loadFill"></div></div>
+  <div id="loadMsg">Cargando...</div>
+</div>
+
 <div id="hint">Toca para mostrar controles</div>
 <div id="toast"></div>
 
 <script>
-/* ── Constants ─────────────────────────────────────── */
-const SW = 1920, SH = 1080; // offscreen slide resolution
+/* ── PDF.js worker ─────────────────────────────────── */
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
 
-const COLORS = ['#ffffff','#e8c87a','#7ab8e8','#e87a9a','#7ae8b8','#e8967a','#ff4444','#000000'];
-const BG_COLORS = [
-  '#0f0f1a','#1a1a2e','#16213e','#0d1b2a','#1e3a2f','#2e1e1e',
-  '#2a1e2e','#2e2a1a','#111118','#1a1118','#f0ede4','#d8e4f0',
-  '#e8e0d0','#ffffff','#2d2d2d','#0a1628'
-];
+/* ── Constants ─────────────────────────────────────── */
+const SW = 1920, SH = 1080;
+const COLORS = ['#ffffff','#e8c87a','#7ab8e8','#e87a9a','#7ae8b8','#ff4444','#000000'];
+const BGS = ['#0f0f1a','#1a1a2e','#16213e','#1e3a2f','#2e1e1e','#2a1e2e','#111118','#f0ede4','#ffffff','#2d2d2d'];
+const DEFBG = ['#1a1a2e','#16213e','#1e3a2f','#2e1e1e','#2a1e2e'];
 
 /* ── State ─────────────────────────────────────────── */
-let slides = [], current = 0;
-let tool = 'pen', color = '#ffffff', size = 5;
-let drawing = false, laserTrail = [], laserTmr = null;
-let uiVisible = false, uiTmr = null;
+let slides = [], cur = 0;
+let tool = 'pen', color = '#ffffff', sz = 5;
+let drawing = false, laserT = [], laserTmr = null;
+let uiVis = false, uiTmr = null;
 
 /* ── Canvases ──────────────────────────────────────── */
-const sC = document.getElementById('slide-canvas'), dC = document.getElementById('draw-canvas');
+const sC = document.getElementById('sC'), dC = document.getElementById('dC');
 const sX = sC.getContext('2d'), dX = dC.getContext('2d');
 
 function resize() {
   sC.width = dC.width = window.innerWidth;
   sC.height = dC.height = window.innerHeight;
-  renderCurrent();
+  renderCur();
 }
 window.addEventListener('resize', resize);
 
 /* ── Slide model ───────────────────────────────────── */
-const BG_DEF = ['#1a1a2e','#16213e','#1e3a2f','#2e1e1e','#2a1e2e'];
-
 function mkSlide(bg) {
-  return { bg: bg || BG_DEF[slides.length % BG_DEF.length], bgImg: null, off: null, hist: [] };
+  return { bg: bg || DEFBG[slides.length % DEFBG.length], bgImg: null, off: null, hist: [] };
 }
-
-function offCanvas(s) {
+function offC(s) {
   if (!s.off) { const c = document.createElement('canvas'); c.width = SW; c.height = SH; s.off = c; }
   return s.off;
 }
-
-function addSlide() { slides.push(mkSlide()); current = slides.length - 1; renderAll(); }
-
+function addSlide(bg) { slides.push(mkSlide(bg)); cur = slides.length - 1; renderAll(); }
 function delSlide(i) {
   if (slides.length <= 1) { toast('Mínimo una diapositiva'); return; }
   slides.splice(i, 1);
-  if (current >= slides.length) current = slides.length - 1;
+  if (cur >= slides.length) cur = slides.length - 1;
   renderAll();
 }
 
@@ -318,311 +230,458 @@ function paintBg(ctx, s, w, h) {
   }
 }
 
-function renderCurrent() {
-  const W = sC.width, H = sC.height, s = slides[current];
-  sX.clearRect(0, 0, W, H);
-  paintBg(sX, s, W, H);
-  dX.clearRect(0, 0, W, H);
-  if (s.off) dX.drawImage(s.off, 0, 0, W, H);
-  document.getElementById('counter').textContent = `${current + 1} / ${slides.length}`;
+function renderCur() {
+  const W = sC.width, H = sC.height, s = slides[cur];
+  sX.clearRect(0, 0, W, H); paintBg(sX, s, W, H);
+  dX.clearRect(0, 0, W, H); if (s.off) dX.drawImage(s.off, 0, 0, W, H);
+  document.getElementById('cnt').textContent = `${cur + 1} / ${slides.length}`;
 }
-
-function renderAll() { renderCurrent(); buildThumbs(); }
+function renderAll() { renderCur(); buildThumbs(); }
 
 /* ── Thumbnails ────────────────────────────────────── */
 function buildThumbs() {
-  const dr = document.getElementById('thumb-drawer');
-  dr.querySelectorAll('.thumb-item').forEach(e => e.remove());
-  const addBtn = document.getElementById('drawer-add');
-  const TW = 142, TH = Math.round(TW * SH / SW);
-
+  const dr = document.getElementById('drawer');
+  dr.querySelectorAll('.thi').forEach(e => e.remove());
+  const addBtn = document.getElementById('dAdd');
+  const TW = 141, TH = Math.round(TW * SH / SW);
   slides.forEach((s, i) => {
     const div = document.createElement('div');
-    div.className = 'thumb-item' + (i === current ? ' active' : '');
-    const c = document.createElement('canvas');
-    c.width = TW; c.height = TH;
-    const ctx = c.getContext('2d');
-    paintBg(ctx, s, TW, TH);
+    div.className = 'thi' + (i === cur ? ' act' : '');
+    const c = document.createElement('canvas'); c.width = TW; c.height = TH;
+    const ctx = c.getContext('2d'); paintBg(ctx, s, TW, TH);
     if (s.off) ctx.drawImage(s.off, 0, 0, TW, TH);
     div.appendChild(c);
-    const num = document.createElement('span'); num.className = 'thumb-num'; num.textContent = i + 1; div.appendChild(num);
-    const del = document.createElement('button'); del.className = 'thumb-del'; del.textContent = '×';
+    const num = document.createElement('span'); num.className = 'thn'; num.textContent = i + 1; div.appendChild(num);
+    const del = document.createElement('button'); del.className = 'thd'; del.textContent = '×';
     del.addEventListener('click', e => { e.stopPropagation(); delSlide(i); });
     div.appendChild(del);
-    div.addEventListener('click', () => { current = i; renderAll(); });
+    div.addEventListener('click', () => { cur = i; renderAll(); });
     dr.insertBefore(div, addBtn);
   });
 }
 
 /* ── Drawing ───────────────────────────────────────── */
 function saveHist() {
-  const oc = offCanvas(slides[current]);
+  const oc = offC(slides[cur]);
   const snap = document.createElement('canvas'); snap.width = SW; snap.height = SH;
   snap.getContext('2d').drawImage(oc, 0, 0);
-  slides[current].hist.push(snap);
-  if (slides[current].hist.length > 40) slides[current].hist.shift();
+  slides[cur].hist.push(snap);
+  if (slides[cur].hist.length > 30) slides[cur].hist.shift();
 }
 
 function toSlide(x, y) { return { x: x * SW / sC.width, y: y * SH / sC.height }; }
-function evPos(e) { const s = e.touches ? e.touches[0] : e; return { x: s.clientX, y: s.clientY }; }
+function evPos(e) {
+  const s = e.touches ? e.touches[0] : e;
+  const r = dC.getBoundingClientRect();
+  return { x: s.clientX - r.left, y: s.clientY - r.top };
+}
 
-function styleCtx(ctx, scaleW) {
-  const lw = size * scaleW;
-  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  const hx = color.replace('#','');
+function styleCtx(ctx, scW) {
+  const lw = sz * scW; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const hx = color.replace('#', '');
   const r = parseInt(hx.slice(0,2),16), g = parseInt(hx.slice(2,4),16), b = parseInt(hx.slice(4,6),16);
-  if (tool === 'eraser') {
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.strokeStyle = 'rgba(0,0,0,1)'; ctx.lineWidth = lw * 2.5;
-  } else if (tool === 'marker') {
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = `rgba(${r},${g},${b},0.45)`; ctx.lineWidth = lw * 2;
-  } else {
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = `rgba(${r},${g},${b},1)`; ctx.lineWidth = lw;
-  }
-}
-
-function startDraw(e) {
-  if (hitUI(e)) return;
-  e.preventDefault();
-  if (tool === 'laser') laserTrail = [];
-  saveHist();
-  drawing = true;
-  const p = evPos(e);
-  if (tool !== 'laser') {
-    styleCtx(dX, 1); dX.beginPath(); dX.moveTo(p.x, p.y);
-    const sp = toSlide(p.x, p.y);
-    const ox = offCanvas(slides[current]).getContext('2d');
-    styleCtx(ox, SW / sC.width); ox.beginPath(); ox.moveTo(sp.x, sp.y);
-  }
-}
-
-function doDraw(e) {
-  if (!drawing) return;
-  e.preventDefault();
-  const p = evPos(e);
-  if (tool === 'laser') { laserTrail.push({...p, t: Date.now()}); renderLaser(); return; }
-  styleCtx(dX, 1); dX.lineTo(p.x, p.y); dX.stroke(); dX.beginPath(); dX.moveTo(p.x, p.y);
-  const sp = toSlide(p.x, p.y);
-  const ox = offCanvas(slides[current]).getContext('2d');
-  styleCtx(ox, SW / sC.width); ox.lineTo(sp.x, sp.y); ox.stroke(); ox.beginPath(); ox.moveTo(sp.x, sp.y);
-}
-
-function endDraw() {
-  if (!drawing) return;
-  drawing = false;
-  dX.globalCompositeOperation = 'source-over'; dX.beginPath();
-  const ox = offCanvas(slides[current]).getContext('2d');
-  ox.globalCompositeOperation = 'source-over'; ox.beginPath();
-  if (tool === 'laser') {
-    if (laserTmr) clearTimeout(laserTmr);
-    laserTmr = setTimeout(() => { laserTrail = []; renderCurrent(); }, 900);
-  } else { buildThumbs(); }
-}
-
-function renderLaser() {
-  renderCurrent();
-  const now = Date.now();
-  laserTrail = laserTrail.filter(p => now - p.t < 800);
-  if (laserTrail.length < 2) return;
-  for (let i = 1; i < laserTrail.length; i++) {
-    const a = (i / laserTrail.length) * .85;
-    dX.beginPath(); dX.arc(laserTrail[i].x, laserTrail[i].y, size * .5, 0, Math.PI * 2);
-    dX.fillStyle = `rgba(255,55,55,${a})`; dX.fill();
-  }
-  const h = laserTrail[laserTrail.length - 1];
-  dX.beginPath(); dX.arc(h.x, h.y, size + 2, 0, Math.PI * 2);
-  dX.fillStyle = 'rgba(255,80,80,.95)'; dX.fill();
-  const g = dX.createRadialGradient(h.x, h.y, 0, h.x, h.y, size * 3);
-  g.addColorStop(0, 'rgba(255,100,100,.3)'); g.addColorStop(1, 'rgba(255,0,0,0)');
-  dX.beginPath(); dX.arc(h.x, h.y, size * 3, 0, Math.PI * 2); dX.fillStyle = g; dX.fill();
+  if (tool === 'eraser') { ctx.globalCompositeOperation = 'destination-out'; ctx.strokeStyle = 'rgba(0,0,0,1)'; ctx.lineWidth = lw * 2.5; }
+  else if (tool === 'marker') { ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = `rgba(${r},${g},${b},0.45)`; ctx.lineWidth = lw * 2; }
+  else { ctx.globalCompositeOperation = 'source-over'; ctx.strokeStyle = `rgba(${r},${g},${b},1)`; ctx.lineWidth = lw; }
 }
 
 function hitUI(e) {
   const s = e.touches ? e.touches[0] : e;
   const el = document.elementFromPoint(s.clientX, s.clientY);
-  return el && el.closest('#ui, #bg-panel');
+  return el && el.closest('#ui,#bgP,#loadingOverlay');
+}
+
+function startDraw(e) {
+  if (hitUI(e)) return; e.preventDefault();
+  if (tool === 'laser') laserT = [];
+  saveHist(); drawing = true;
+  const p = evPos(e);
+  if (tool !== 'laser') {
+    styleCtx(dX, 1); dX.beginPath(); dX.moveTo(p.x, p.y);
+    const sp = toSlide(p.x, p.y), ox = offC(slides[cur]).getContext('2d');
+    styleCtx(ox, SW / sC.width); ox.beginPath(); ox.moveTo(sp.x, sp.y);
+  }
+}
+function doDraw(e) {
+  if (!drawing) return; e.preventDefault();
+  const p = evPos(e);
+  if (tool === 'laser') { laserT.push({...p, t: Date.now()}); renderLaser(); return; }
+  styleCtx(dX, 1); dX.lineTo(p.x, p.y); dX.stroke(); dX.beginPath(); dX.moveTo(p.x, p.y);
+  const sp = toSlide(p.x, p.y), ox = offC(slides[cur]).getContext('2d');
+  styleCtx(ox, SW / sC.width); ox.lineTo(sp.x, sp.y); ox.stroke(); ox.beginPath(); ox.moveTo(sp.x, sp.y);
+}
+function endDraw() {
+  if (!drawing) return; drawing = false;
+  dX.globalCompositeOperation = 'source-over'; dX.beginPath();
+  offC(slides[cur]).getContext('2d').globalCompositeOperation = 'source-over';
+  if (tool === 'laser') {
+    if (laserTmr) clearTimeout(laserTmr);
+    laserTmr = setTimeout(() => { laserT = []; renderCur(); }, 900);
+  } else buildThumbs();
+}
+function renderLaser() {
+  renderCur(); const now = Date.now();
+  laserT = laserT.filter(p => now - p.t < 800);
+  if (laserT.length < 2) return;
+  for (let i = 1; i < laserT.length; i++) {
+    const a = (i / laserT.length) * .85;
+    dX.beginPath(); dX.arc(laserT[i].x, laserT[i].y, sz * .5, 0, Math.PI*2);
+    dX.fillStyle = `rgba(255,55,55,${a})`; dX.fill();
+  }
+  const h = laserT[laserT.length-1];
+  dX.beginPath(); dX.arc(h.x, h.y, sz+2, 0, Math.PI*2); dX.fillStyle='rgba(255,80,80,.95)'; dX.fill();
 }
 
 dC.addEventListener('mousedown', startDraw);
 dC.addEventListener('mousemove', doDraw);
 dC.addEventListener('mouseup', endDraw);
 dC.addEventListener('mouseleave', endDraw);
-dC.addEventListener('touchstart', startDraw, { passive: false });
-dC.addEventListener('touchmove',  doDraw,     { passive: false });
-dC.addEventListener('touchend',   endDraw);
+dC.addEventListener('touchstart', startDraw, {passive:false});
+dC.addEventListener('touchmove', doDraw, {passive:false});
+dC.addEventListener('touchend', endDraw);
 
 /* ── UI show/hide ──────────────────────────────────── */
 const ui = document.getElementById('ui'), hint = document.getElementById('hint');
-
 function showUI(auto = true) {
-  uiVisible = true;
-  ui.classList.add('visible');
-  hint.classList.add('gone');
-  clearTimeout(uiTmr);
-  if (auto) uiTmr = setTimeout(hideUI, 4500);
+  uiVis = true; ui.classList.add('vis'); hint.classList.add('gone');
+  clearTimeout(uiTmr); if (auto) uiTmr = setTimeout(hideUI, 4500);
 }
 function hideUI() {
-  uiVisible = false;
-  ui.classList.remove('visible');
-  hint.classList.remove('gone');
-  document.getElementById('thumb-drawer').classList.remove('open');
-  document.getElementById('bg-panel').classList.remove('open');
+  uiVis = false; ui.classList.remove('vis'); hint.classList.remove('gone');
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('bgP').classList.remove('open');
 }
-
-sC.addEventListener('click', e => { if (!hitUI(e)) uiVisible ? hideUI() : showUI(); });
-dC.addEventListener('click', e => { if (!hitUI(e) && !drawing) uiVisible ? hideUI() : showUI(); });
+sC.addEventListener('click', e => { if (!hitUI(e)) uiVis ? hideUI() : showUI(); });
+dC.addEventListener('click', e => { if (!hitUI(e) && !drawing) uiVis ? hideUI() : showUI(); });
 ui.addEventListener('pointerenter', () => clearTimeout(uiTmr));
 ui.addEventListener('pointerleave', () => { uiTmr = setTimeout(hideUI, 3500); });
 
-/* ── Toolbar wiring ────────────────────────────────── */
+/* ── Tools ─────────────────────────────────────────── */
 function setTool(t) {
   tool = t;
-  ['tool-pen','tool-marker','tool-eraser','tool-laser'].forEach(id =>
-    document.getElementById(id).classList.toggle('active', id.endsWith(t)));
+  ['tPen','tMark','tErase','tLaser'].forEach(id =>
+    document.getElementById(id).classList.toggle('act', id.toLowerCase().endsWith(t.toLowerCase())));
   dC.style.cursor = t === 'eraser' ? 'cell' : 'crosshair';
 }
-document.getElementById('tool-pen').addEventListener('click', () => { setTool('pen'); showUI(); });
-document.getElementById('tool-marker').addEventListener('click', () => { setTool('marker'); showUI(); });
-document.getElementById('tool-eraser').addEventListener('click', () => { setTool('eraser'); showUI(); });
-document.getElementById('tool-laser').addEventListener('click', () => { setTool('laser'); showUI(); });
+({tPen:'pen',tMark:'marker',tErase:'eraser',tLaser:'laser'})
+  && Object.entries({tPen:'pen',tMark:'marker',tErase:'eraser',tLaser:'laser'})
+    .forEach(([id,t]) => document.getElementById(id).addEventListener('click', () => { setTool(t); showUI(); }));
 
-document.getElementById('btn-prev').addEventListener('click', () => { if (current > 0) { current--; renderAll(); } showUI(); });
-document.getElementById('btn-next').addEventListener('click', () => { if (current < slides.length - 1) { current++; renderAll(); } showUI(); });
-document.getElementById('btn-add').addEventListener('click', () => { addSlide(); showUI(); });
-document.getElementById('drawer-add').addEventListener('click', () => { addSlide(); showUI(); });
-document.getElementById('btn-thumbs').addEventListener('click', () => { document.getElementById('thumb-drawer').classList.toggle('open'); showUI(false); });
+document.getElementById('bPrev').addEventListener('click', () => { if (cur > 0) { cur--; renderAll(); } showUI(); });
+document.getElementById('bNext').addEventListener('click', () => { if (cur < slides.length-1) { cur++; renderAll(); } showUI(); });
+document.getElementById('bAdd').addEventListener('click', () => { addSlide(); showUI(); });
+document.getElementById('dAdd').addEventListener('click', () => { addSlide(); showUI(); });
+document.getElementById('bTh').addEventListener('click', () => { document.getElementById('drawer').classList.toggle('open'); showUI(false); });
 
-document.getElementById('btn-undo').addEventListener('click', () => {
-  const h = slides[current].hist;
-  if (!h.length) { toast('Sin más acciones'); return; }
-  const prev = h.pop(), oc = offCanvas(slides[current]), ctx = oc.getContext('2d');
-  ctx.clearRect(0, 0, SW, SH); ctx.drawImage(prev, 0, 0);
-  renderCurrent(); buildThumbs(); showUI();
+document.getElementById('bUndo').addEventListener('click', () => {
+  const h = slides[cur].hist; if (!h.length) { toast('Sin más acciones'); return; }
+  const prev = h.pop(), oc = offC(slides[cur]), ctx = oc.getContext('2d');
+  ctx.clearRect(0,0,SW,SH); ctx.drawImage(prev,0,0); renderCur(); buildThumbs(); showUI();
 });
-document.getElementById('btn-clear').addEventListener('click', () => {
-  saveHist();
-  offCanvas(slides[current]).getContext('2d').clearRect(0, 0, SW, SH);
-  renderCurrent(); buildThumbs(); showUI();
+document.getElementById('bClr').addEventListener('click', () => {
+  saveHist(); offC(slides[cur]).getContext('2d').clearRect(0,0,SW,SH); renderCur(); buildThumbs(); showUI();
 });
 
-// Images
-document.getElementById('btn-img').addEventListener('click', () => document.getElementById('file-img').click());
-document.getElementById('file-img').addEventListener('change', function() {
-  const file = this.files[0]; if (!file) return;
-  const fr = new FileReader();
-  fr.onload = ev => {
-    const img = new Image();
-    img.onload = () => {
-      saveHist();
-      const ctx = offCanvas(slides[current]).getContext('2d');
-      const sc = Math.min(SW / img.width, SH / img.height) * .65;
+/* ── Image insert ──────────────────────────────────── */
+document.getElementById('bImg').addEventListener('click', () => document.getElementById('fImg').click());
+document.getElementById('fImg').addEventListener('change', function() {
+  const f = this.files[0]; if (!f) return;
+  const fr = new FileReader(); fr.onload = ev => {
+    const img = new Image(); img.onload = () => {
+      saveHist(); const ctx = offC(slides[cur]).getContext('2d');
+      const sc = Math.min(SW/img.width, SH/img.height) * .65;
       ctx.globalCompositeOperation = 'source-over';
-      ctx.drawImage(img, (SW - img.width * sc) / 2, (SH - img.height * sc) / 2, img.width * sc, img.height * sc);
-      renderCurrent(); buildThumbs();
-    };
-    img.src = ev.target.result;
-  };
-  fr.readAsDataURL(file); this.value = '';
+      ctx.drawImage(img, (SW-img.width*sc)/2, (SH-img.height*sc)/2, img.width*sc, img.height*sc);
+      renderCur(); buildThumbs();
+    }; img.src = ev.target.result;
+  }; fr.readAsDataURL(f); this.value = '';
 });
-document.getElementById('btn-bg').addEventListener('click', () => { document.getElementById('bg-panel').classList.toggle('open'); showUI(false); });
-document.getElementById('file-bg').addEventListener('change', function() {
-  const file = this.files[0]; if (!file) return;
-  const fr = new FileReader();
-  fr.onload = ev => {
-    const img = new Image();
-    img.onload = () => { slides[current].bgImg = img; slides[current].bg = null; renderAll(); };
+
+/* ── Background ────────────────────────────────────── */
+document.getElementById('bBg').addEventListener('click', () => { document.getElementById('bgP').classList.toggle('open'); showUI(false); });
+document.getElementById('fBg').addEventListener('change', function() {
+  const f = this.files[0]; if (!f) return;
+  const fr = new FileReader(); fr.onload = ev => {
+    const img = new Image(); img.onload = () => { slides[cur].bgImg = img; slides[cur].bg = null; renderAll(); };
     img.src = ev.target.result;
-  };
-  fr.readAsDataURL(file); this.value = '';
+  }; fr.readAsDataURL(f); this.value = '';
+});
+
+/* ── Loading overlay ───────────────────────────────── */
+function showLoading(msg, pct) {
+  const ov = document.getElementById('loadingOverlay');
+  ov.classList.add('show');
+  document.getElementById('loadMsg').textContent = msg;
+  document.getElementById('loadFill').style.width = pct + '%';
+}
+function hideLoading() { document.getElementById('loadingOverlay').classList.remove('show'); }
+
+/* ── PDF Import ────────────────────────────────────── */
+document.getElementById('bPdf').addEventListener('click', () => document.getElementById('fPdf').click());
+document.getElementById('fPdf').addEventListener('change', async function() {
+  const file = this.files[0]; if (!file) return;
+  this.value = '';
+  if (typeof pdfjsLib === 'undefined') { toast('PDF.js no cargó, verifica conexión'); return; }
+
+  showLoading('Leyendo PDF…', 5);
+  try {
+    const ab = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+    const total = pdf.numPages;
+    const insertAt = slides.length;
+
+    for (let i = 1; i <= total; i++) {
+      showLoading(`Convirtiendo página ${i} de ${total}…`, Math.round((i / total) * 90));
+      const page = await pdf.getPage(i);
+      const vp = page.getViewport({ scale: 1 });
+      const scale = Math.min(SW / vp.width, SH / vp.height);
+      const viewport = page.getViewport({ scale });
+
+      const tmp = document.createElement('canvas');
+      tmp.width = viewport.width; tmp.height = viewport.height;
+      await page.render({ canvasContext: tmp.getContext('2d'), viewport }).promise;
+
+      // Convert to bgImg
+      const img = new Image(); img.src = tmp.toDataURL();
+      await new Promise(res => { img.onload = res; });
+
+      const s = mkSlide('#111118');
+      s.bgImg = img;
+      slides.splice(insertAt + i - 1, 0, s);
+    }
+
+    cur = insertAt;
+    hideLoading();
+    renderAll();
+    toast(`✓ PDF importado: ${total} página${total>1?'s':''}`);
+    showUI();
+  } catch(e) {
+    hideLoading();
+    toast('Error al leer el PDF');
+    console.error(e);
+  }
+});
+
+/* ── PPTX Import ───────────────────────────────────── */
+document.getElementById('bPptx').addEventListener('click', () => document.getElementById('fPptx').click());
+document.getElementById('fPptx').addEventListener('change', async function() {
+  const file = this.files[0]; if (!file) return;
+  this.value = '';
+  if (typeof JSZip === 'undefined') { toast('JSZip no cargó, verifica conexión'); return; }
+
+  showLoading('Leyendo PowerPoint…', 5);
+  try {
+    const ab = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(ab);
+
+    // Extract slide images from media or render slides as images
+    // First, try to find slide thumbnails in ppt/media or ppt/slides
+    const slideEntries = Object.keys(zip.files)
+      .filter(k => k.match(/^ppt\/slides\/slide\d+\.xml$/))
+      .sort((a, b) => {
+        const na = parseInt(a.match(/\d+/)[0]), nb = parseInt(b.match(/\d+/)[0]);
+        return na - nb;
+      });
+
+    if (slideEntries.length === 0) { hideLoading(); toast('No se encontraron diapositivas en el archivo'); return; }
+
+    const total = slideEntries.length;
+    const insertAt = slides.length;
+
+    // Parse each slide XML and render a basic representation
+    for (let i = 0; i < total; i++) {
+      showLoading(`Procesando diapositiva ${i+1} de ${total}…`, Math.round(5 + (i/total)*85));
+
+      const xmlStr = await zip.files[slideEntries[i]].async('string');
+      const parser = new DOMParser();
+      const xmlDoc = parser.parseFromString(xmlStr, 'text/xml');
+
+      // Get slide relationships to find images
+      const relPath = slideEntries[i].replace('slides/slide', 'slides/_rels/slide').replace('.xml', '.xml.rels');
+      let rels = {};
+      if (zip.files[relPath]) {
+        const relStr = await zip.files[relPath].async('string');
+        const relDoc = parser.parseFromString(relStr, 'text/xml');
+        relDoc.querySelectorAll('Relationship').forEach(r => {
+          rels[r.getAttribute('Id')] = r.getAttribute('Target');
+        });
+      }
+
+      // Render slide on canvas
+      const tmp = document.createElement('canvas'); tmp.width = SW; tmp.height = SH;
+      const ctx = tmp.getContext('2d');
+
+      // Background: try to get slide background color
+      let bgColor = '#1a1a2e';
+      const bgEls = xmlDoc.getElementsByTagNameNS('*', 'bg');
+      if (bgEls.length > 0) {
+        const solidFill = bgEls[0].getElementsByTagNameNS('*', 'solidFill')[0];
+        if (solidFill) {
+          const srgb = solidFill.getElementsByTagNameNS('*', 'srgbClr')[0];
+          if (srgb) bgColor = '#' + srgb.getAttribute('val');
+        }
+      }
+      ctx.fillStyle = bgColor; ctx.fillRect(0, 0, SW, SH);
+
+      // Extract and draw embedded images
+      const blipFills = xmlDoc.getElementsByTagNameNS('*', 'blipFill');
+      for (const bf of blipFills) {
+        const blip = bf.getElementsByTagNameNS('*', 'blip')[0];
+        if (!blip) continue;
+        const rEmbed = blip.getAttribute('r:embed') || blip.getAttribute('embed');
+        if (!rEmbed || !rels[rEmbed]) continue;
+        const mediaPath = 'ppt/slides/' + rels[rEmbed];
+        const normalPath = mediaPath.replace(/\/\.\.\//g, '/').replace('ppt/slides/ppt/', 'ppt/');
+        const mediaKey = Object.keys(zip.files).find(k =>
+          k === normalPath || k === 'ppt/media/' + rels[rEmbed].split('/').pop()
+        );
+        if (!mediaKey) continue;
+        try {
+          const mediaData = await zip.files[mediaKey].async('base64');
+          const ext = mediaKey.split('.').pop().toLowerCase();
+          const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'png' ? 'image/png' : 'image/'+ext;
+          const imgSrc = `data:${mime};base64,${mediaData}`;
+          const img = new Image(); img.src = imgSrc;
+          await new Promise(res => { img.onload = res; img.onerror = res; });
+          if (img.width > 0) {
+            const sc = Math.min(SW/img.width, SH/img.height);
+            ctx.drawImage(img, (SW-img.width*sc)/2, (SH-img.height*sc)/2, img.width*sc, img.height*sc);
+          }
+        } catch(e) { /* skip bad image */ }
+      }
+
+      // Extract text elements
+      const txBodies = xmlDoc.getElementsByTagNameNS('*', 'txBody');
+      let yOffset = 80;
+      const drawnTexts = new Set();
+      for (const txb of txBodies) {
+        const paras = txb.getElementsByTagNameNS('*', 'p');
+        for (const p of paras) {
+          const runs = p.getElementsByTagNameNS('*', 'r');
+          let text = '';
+          for (const r of runs) {
+            const t = r.getElementsByTagNameNS('*', 't')[0];
+            if (t) text += t.textContent;
+          }
+          text = text.trim();
+          if (!text || drawnTexts.has(text)) continue;
+          drawnTexts.add(text);
+
+          // Determine font size from XML
+          let fontSize = 28;
+          const rPr = txb.getElementsByTagNameNS('*', 'rPr')[0];
+          if (rPr) { const sz = rPr.getAttribute('sz'); if (sz) fontSize = Math.round(parseInt(sz)/100 * (SH/720)); }
+          fontSize = Math.max(16, Math.min(fontSize, 72));
+
+          // Color
+          let textColor = '#ffffff';
+          if (rPr) {
+            const solidFill = rPr.getElementsByTagNameNS('*', 'solidFill')[0];
+            if (solidFill) {
+              const srgb = solidFill.getElementsByTagNameNS('*', 'srgbClr')[0];
+              if (srgb) textColor = '#' + srgb.getAttribute('val');
+            }
+          }
+
+          ctx.font = `${fontSize}px system-ui, sans-serif`;
+          ctx.fillStyle = textColor;
+          ctx.textAlign = 'center';
+          ctx.fillText(text, SW/2, yOffset + fontSize, SW - 120);
+          yOffset += fontSize + 12;
+          if (yOffset > SH - 60) break;
+        }
+        if (yOffset > SH - 60) break;
+      }
+
+      const img = new Image(); img.src = tmp.toDataURL('image/jpeg', 0.92);
+      await new Promise(res => { img.onload = res; });
+      const s = mkSlide('#111118'); s.bgImg = img;
+      slides.splice(insertAt + i, 0, s);
+    }
+
+    cur = insertAt;
+    hideLoading();
+    renderAll();
+    toast(`✓ PPTX importado: ${total} diapositiva${total>1?'s':''}`);
+    showUI();
+  } catch(e) {
+    hideLoading();
+    toast('Error al leer el PPTX');
+    console.error(e);
+  }
 });
 
 /* ── Palette ───────────────────────────────────────── */
-const pal = document.getElementById('palette');
+const pal = document.getElementById('pal');
 COLORS.forEach(c => {
-  const d = document.createElement('div'); d.className = 'cdot' + (c === color ? ' active' : '');
+  const d = document.createElement('div'); d.className = 'cd' + (c === color ? ' act' : '');
   d.style.background = c;
-  d.addEventListener('click', () => { color = c; pal.querySelectorAll('.cdot').forEach(x => x.classList.remove('active')); d.classList.add('active'); showUI(); });
+  d.addEventListener('click', () => { color = c; pal.querySelectorAll('.cd').forEach(x => x.classList.remove('act')); d.classList.add('act'); showUI(); });
   pal.appendChild(d);
 });
 
-/* ── Size slider ───────────────────────────────────── */
-document.getElementById('size-slider').addEventListener('input', function() {
-  size = +this.value;
-  const s = Math.max(3, Math.min(size, 18));
-  document.getElementById('sz-dot').style.cssText = `width:${s}px;height:${s}px;border-radius:50%;background:var(--text);transition:width .1s,height .1s`;
+/* ── Size ──────────────────────────────────────────── */
+document.getElementById('szR').addEventListener('input', function() {
+  sz = +this.value; const s = Math.max(3, Math.min(sz, 18));
+  const dot = document.getElementById('szDot');
+  dot.style.width = s+'px'; dot.style.height = s+'px';
+  dot.style.borderRadius = '50%'; dot.style.background = 'var(--text)';
   showUI();
 });
 
 /* ── Background swatches ───────────────────────────── */
-const bgPanel = document.getElementById('bg-panel');
-BG_COLORS.forEach(c => {
-  const sw = document.createElement('div'); sw.className = 'bg-sw'; sw.style.background = c;
+const bgP = document.getElementById('bgP');
+BGS.forEach(c => {
+  const sw = document.createElement('div'); sw.className = 'bgsw'; sw.style.background = c;
   sw.addEventListener('click', () => {
-    slides[current].bgImg = null; slides[current].bg = c;
-    bgPanel.querySelectorAll('.bg-sw').forEach(x => x.classList.remove('active')); sw.classList.add('active');
+    slides[cur].bgImg = null; slides[cur].bg = c;
+    bgP.querySelectorAll('.bgsw').forEach(x => x.classList.remove('act')); sw.classList.add('act');
     renderAll();
-  });
-  bgPanel.appendChild(sw);
+  }); bgP.appendChild(sw);
 });
-const fileSw = document.createElement('div'); fileSw.className = 'bg-sw';
-fileSw.style.cssText = 'background:linear-gradient(135deg,#7ab8e8,#e8c87a);display:flex;align-items:center;justify-content:center;font-size:15px;';
-fileSw.textContent = '🖼'; fileSw.title = 'Imagen de fondo';
-fileSw.addEventListener('click', () => { document.getElementById('file-bg').click(); bgPanel.classList.remove('open'); });
-bgPanel.appendChild(fileSw);
+const fileSw = document.createElement('div'); fileSw.className = 'bgsw';
+fileSw.style.cssText = 'background:linear-gradient(135deg,#7ab8e8,#e8c87a);display:flex;align-items:center;justify-content:center;font-size:13px';
+fileSw.textContent = '🖼';
+fileSw.addEventListener('click', () => { document.getElementById('fBg').click(); bgP.classList.remove('open'); });
+bgP.appendChild(fileSw);
+
+/* ── Fullscreen ────────────────────────────────────── */
+const bFs = document.getElementById('bFs');
+function toggleFS() {
+  const el = document.documentElement;
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  if (isFs) { (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document); }
+  else {
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) req.call(el, {navigationUI:'hide'}).catch(()=>{});
+    else toast('En Safari: Compartir → Añadir a pantalla de inicio');
+  }
+  showUI();
+}
+bFs.addEventListener('click', toggleFS);
+document.addEventListener('fullscreenchange', () => { bFs.textContent = document.fullscreenElement ? '⊠' : '⛶'; });
+document.addEventListener('webkitfullscreenchange', () => { bFs.textContent = document.webkitFullscreenElement ? '⊠' : '⛶'; });
 
 /* ── Keyboard ──────────────────────────────────────── */
 document.addEventListener('keydown', e => {
-  if (e.key === 'ArrowRight' || e.key === ' ') { if (current < slides.length - 1) { current++; renderAll(); } }
-  if (e.key === 'ArrowLeft') { if (current > 0) { current--; renderAll(); } }
-  if (e.key === 'Escape') hideUI();
+  if (e.key==='ArrowRight'||e.key===' ') { if(cur<slides.length-1){cur++;renderAll();} }
+  if (e.key==='ArrowLeft') { if(cur>0){cur--;renderAll();} }
+  if (e.key==='Escape') hideUI();
   showUI();
 });
 
 /* ── Toast ─────────────────────────────────────────── */
 let toastTmr;
 function toast(msg) {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.classList.add('show');
-  clearTimeout(toastTmr); toastTmr = setTimeout(() => el.classList.remove('show'), 2200);
+  const el = document.getElementById('toast'); el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTmr); toastTmr = setTimeout(() => el.classList.remove('show'), 2500);
 }
-
-/* ── Fullscreen ────────────────────────────────────── */
-const btnFs = document.getElementById('btn-fs');
-
-function toggleFS() {
-  const el = document.documentElement;
-  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
-  if (isFs) {
-    (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
-  } else {
-    const req = el.requestFullscreen || el.webkitRequestFullscreen;
-    if (req) {
-      req.call(el, { navigationUI: 'hide' }).catch(() => {});
-    } else {
-      // iOS Safari fallback: hide address bar by scrolling
-      window.scrollTo(0, 1);
-      toast('En Safari: Compartir → Añadir a pantalla de inicio para pantalla completa real');
-    }
-  }
-  showUI();
-}
-
-btnFs.addEventListener('click', toggleFS);
-
-document.addEventListener('fullscreenchange', () => {
-  btnFs.textContent = document.fullscreenElement ? '✕⛶' : '⛶';
-});
-document.addEventListener('webkitfullscreenchange', () => {
-  btnFs.textContent = document.webkitFullscreenElement ? '✕⛶' : '⛶';
-});
 
 /* ── Init ──────────────────────────────────────────── */
-['#1a1a2e','#16213e','#1e3a2f'].forEach(c => slides.push(mkSlide(c)));
+DEFBG.slice(0,3).forEach(c => slides.push(mkSlide(c)));
 resize();
-setTimeout(() => { showUI(true); }, 400);
-setTimeout(() => toast('Toca ⛶ para pantalla completa'), 700);
+setTimeout(() => showUI(true), 400);
+setTimeout(() => toast('📄 PDF  📊 PPTX — importa tus archivos'), 700);
 </script>
 </body>
 </html>
