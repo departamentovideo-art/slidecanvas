@@ -224,6 +224,8 @@ html, body {
     <div class="sep"></div>
     <button class="btn" id="btn-img" title="Insertar imagen">🖼</button>
     <button class="btn" id="btn-bg" title="Fondo">🎨</button>
+    <div class="sep"></div>
+    <button class="btn" id="btn-fs" title="Pantalla completa">⛶</button>
     <input type="file" id="file-img" accept="image/*" style="display:none">
     <input type="file" id="file-bg" accept="image/*" style="display:none">
   </div>
@@ -586,11 +588,41 @@ function toast(msg) {
   clearTimeout(toastTmr); toastTmr = setTimeout(() => el.classList.remove('show'), 2200);
 }
 
+/* ── Fullscreen ────────────────────────────────────── */
+const btnFs = document.getElementById('btn-fs');
+
+function toggleFS() {
+  const el = document.documentElement;
+  const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  if (isFs) {
+    (document.exitFullscreen || document.webkitExitFullscreen || function(){}).call(document);
+  } else {
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (req) {
+      req.call(el, { navigationUI: 'hide' }).catch(() => {});
+    } else {
+      // iOS Safari fallback: hide address bar by scrolling
+      window.scrollTo(0, 1);
+      toast('En Safari: Compartir → Añadir a pantalla de inicio para pantalla completa real');
+    }
+  }
+  showUI();
+}
+
+btnFs.addEventListener('click', toggleFS);
+
+document.addEventListener('fullscreenchange', () => {
+  btnFs.textContent = document.fullscreenElement ? '✕⛶' : '⛶';
+});
+document.addEventListener('webkitfullscreenchange', () => {
+  btnFs.textContent = document.webkitFullscreenElement ? '✕⛶' : '⛶';
+});
+
 /* ── Init ──────────────────────────────────────────── */
 ['#1a1a2e','#16213e','#1e3a2f'].forEach(c => slides.push(mkSlide(c)));
 resize();
 setTimeout(() => { showUI(true); }, 400);
-setTimeout(() => toast('Toca la pantalla para mostrar/ocultar controles'), 700);
+setTimeout(() => toast('Toca ⛶ para pantalla completa'), 700);
 </script>
 </body>
 </html>
