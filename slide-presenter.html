@@ -291,8 +291,28 @@ function hitUI(e) {
   return el && el.closest('#ui,#bgP,#loadingOverlay');
 }
 
+/* ── Detect Apple Pencil vs finger ─────────────────
+   PointerEvents give us pointerType:
+   'pen'   → Apple Pencil  → draw
+   'mouse' → mouse         → draw
+   'touch' → finger        → gestures only           */
+
+function isPen(e) {
+  // PointerEvent: pen or mouse
+  if (e.pointerType !== undefined) return e.pointerType === 'pen' || e.pointerType === 'mouse';
+  // TouchEvent fallback: touches with touchType (Safari)
+  if (e.touches && e.touches[0] && e.touches[0].touchType !== undefined)
+    return e.touches[0].touchType === 'stylus';
+  // MouseEvent (desktop)
+  if (e.type && e.type.startsWith('mouse')) return true;
+  return false;
+}
+
+/* ── Draw logic (pen/mouse only) ───────────────────── */
 function startDraw(e) {
-  if (hitUI(e)) return; e.preventDefault();
+  if (hitUI(e)) return;
+  if (!isPen(e)) return; // ignore fingers
+  e.preventDefault();
   if (tool === 'laser') laserT = [];
   saveHist(); drawing = true;
   const p = evPos(e);
@@ -303,15 +323,18 @@ function startDraw(e) {
   }
 }
 function doDraw(e) {
-  if (!drawing) return; e.preventDefault();
+  if (!drawing) return;
+  if (!isPen(e)) return;
+  e.preventDefault();
   const p = evPos(e);
   if (tool === 'laser') { laserT.push({...p, t: Date.now()}); renderLaser(); return; }
   styleCtx(dX, 1); dX.lineTo(p.x, p.y); dX.stroke(); dX.beginPath(); dX.moveTo(p.x, p.y);
   const sp = toSlide(p.x, p.y), ox = offC(slides[cur]).getContext('2d');
   styleCtx(ox, SW / sC.width); ox.lineTo(sp.x, sp.y); ox.stroke(); ox.beginPath(); ox.moveTo(sp.x, sp.y);
 }
-function endDraw() {
-  if (!drawing) return; drawing = false;
+function endDraw(e) {
+  if (!drawing) return;
+  drawing = false;
   dX.globalCompositeOperation = 'source-over'; dX.beginPath();
   offC(slides[cur]).getContext('2d').globalCompositeOperation = 'source-over';
   if (tool === 'laser') {
@@ -332,13 +355,121 @@ function renderLaser() {
   dX.beginPath(); dX.arc(h.x, h.y, sz+2, 0, Math.PI*2); dX.fillStyle='rgba(255,80,80,.95)'; dX.fill();
 }
 
-dC.addEventListener('mousedown', startDraw);
-dC.addEventListener('mousemove', doDraw);
-dC.addEventListener('mouseup', endDraw);
-dC.addEventListener('mouseleave', endDraw);
-dC.addEventListener('touchstart', startDraw, {passive:false});
-dC.addEventListener('touchmove', doDraw, {passive:false});
-dC.addEventListener('touchend', endDraw);
+/* Pointer events (handles both pen and mouse cleanly) */
+dC.addEventListener('pointerdown', e => { if (e.pointerType==='pen'||e.pointerType==='mouse') startDraw(e); });
+dC.addEventListener('pointermove', e => { if (e.pointerType==='pen'||e.pointerType==='mouse') doDraw(e); });
+dC.addEventListener('pointerup',   e => { if (e.pointerType==='pen'||e.pointerType==='mouse') endDraw(e); });
+dC.addEventListener('pointerout',  e => { if (e.pointerType==='pen'||e.pointerType==='mouse') endDraw(e); });
+
+/* ── Finger gestures ───────────────────────────────
+   1 finger swipe  → change slide
+   2 finger pinch  → zoom in/out
+   tap (no drag)   → toggle UI                        */
+
+let touchState = null; // tracks active finger gesture
+let zoom = 1, zoomOriginX = 0, zoomOriginY = 0;
+
+function applyZoom() {
+  const z = Math.max(1, Math.min(zoom, 4));
+  zoom = z;
+  const el = document.getElementById('slide-zoom-wrap');
+  if (!el) return;
+  el.style.transform = z === 1
+    ? 'none'
+    : `scale(${z}) translate(${zoomOriginX}px, ${zoomOriginY}px)`;
+}
+
+dC.addEventListener('touchstart', e => {
+  if (hitUI(e)) return;
+  // If any touch is a stylus, let pointer events handle it
+  if ([...e.touches].some(t => t.touchType === 'stylus')) return;
+  e.preventDefault();
+
+  if (e.touches.length === 1) {
+    touchState = {
+      type: 'swipe',
+      startX: e.touches[0].clientX,
+      startY: e.touches[0].clientY,
+      moved: false,
+      t: Date.now()
+    };
+  } else if (e.touches.length === 2) {
+    const dx = e.touches[1].clientX - e.touches[0].clientX;
+    const dy = e.touches[1].clientY - e.touches[0].clientY;
+    touchState = {
+      type: 'pinch',
+      startDist: Math.hypot(dx, dy),
+      startZoom: zoom,
+      midX: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+      midY: (e.touches[0].clientY + e.touches[1].clientY) / 2
+    };
+  }
+}, { passive: false });
+
+dC.addEventListener('touchmove', e => {
+  if (hitUI(e)) return;
+  if ([...e.touches].some(t => t.touchType === 'stylus')) return;
+  if (!touchState) return;
+  e.preventDefault();
+
+  if (touchState.type === 'swipe' && e.touches.length === 1) {
+    const dx = e.touches[0].clientX - touchState.startX;
+    const dy = e.touches[0].clientY - touchState.startY;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) touchState.moved = true;
+
+    // Visual drag feedback
+    if (zoom <= 1 && Math.abs(dx) > Math.abs(dy)) {
+      sC.style.transform = `translateX(${dx * 0.3}px)`;
+      dC.style.transform = `translateX(${dx * 0.3}px)`;
+    }
+  } else if (touchState.type === 'pinch' && e.touches.length === 2) {
+    const dx = e.touches[1].clientX - e.touches[0].clientX;
+    const dy = e.touches[1].clientY - e.touches[0].clientY;
+    const dist = Math.hypot(dx, dy);
+    zoom = Math.max(1, Math.min(4, touchState.startZoom * (dist / touchState.startDist)));
+    // Apply zoom via CSS transform on canvases
+    const ox = (touchState.midX / window.innerWidth - 0.5) * -100;
+    const oy = (touchState.midY / window.innerHeight - 0.5) * -100;
+    [sC, dC].forEach(c => {
+      c.style.transformOrigin = `${touchState.midX}px ${touchState.midY}px`;
+      c.style.transform = `scale(${zoom})`;
+    });
+  }
+}, { passive: false });
+
+dC.addEventListener('touchend', e => {
+  if (hitUI(e)) return;
+  if ([...e.changedTouches].some(t => t.touchType === 'stylus')) return;
+  if (!touchState) return;
+  e.preventDefault();
+
+  if (touchState.type === 'swipe') {
+    const dx = e.changedTouches[0].clientX - touchState.startX;
+    const dy = e.changedTouches[0].clientY - touchState.startY;
+    const dt = Date.now() - touchState.t;
+
+    // Reset drag visual
+    sC.style.transform = '';
+    dC.style.transform = '';
+
+    if (touchState.moved && Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50 && dt < 600) {
+      // Swipe left → next, right → prev
+      if (dx < 0 && cur < slides.length - 1) { cur++; renderAll(); }
+      else if (dx > 0 && cur > 0) { cur--; renderAll(); }
+    } else if (!touchState.moved && dt < 300) {
+      // Tap → toggle UI
+      uiVis ? hideUI() : showUI();
+    }
+  } else if (touchState.type === 'pinch') {
+    // If zoomed back to ~1, reset transform
+    if (zoom <= 1.05) {
+      zoom = 1;
+      [sC, dC].forEach(c => { c.style.transform = ''; c.style.transformOrigin = ''; });
+    }
+  }
+
+  if (e.touches.length === 0) touchState = null;
+}, { passive: false });
 
 /* ── UI show/hide ──────────────────────────────────── */
 const ui = document.getElementById('ui'), hint = document.getElementById('hint');
@@ -351,8 +482,12 @@ function hideUI() {
   document.getElementById('drawer').classList.remove('open');
   document.getElementById('bgP').classList.remove('open');
 }
-sC.addEventListener('click', e => { if (!hitUI(e)) uiVis ? hideUI() : showUI(); });
-dC.addEventListener('click', e => { if (!hitUI(e) && !drawing) uiVis ? hideUI() : showUI(); });
+// UI toggle handled by touch gestures and pointer tap below
+dC.addEventListener('click', e => {
+  // Only for mouse clicks (desktop), not touch (handled in touchend)
+  if (e.pointerType === 'touch' || e.sourceCapabilities?.firesTouchEvents) return;
+  if (!hitUI(e) && !drawing) uiVis ? hideUI() : showUI();
+});
 ui.addEventListener('pointerenter', () => clearTimeout(uiTmr));
 ui.addEventListener('pointerleave', () => { uiTmr = setTimeout(hideUI, 3500); });
 
@@ -681,7 +816,7 @@ function toast(msg) {
 DEFBG.slice(0,3).forEach(c => slides.push(mkSlide(c)));
 resize();
 setTimeout(() => showUI(true), 400);
-setTimeout(() => toast('📄 PDF  📊 PPTX — importa tus archivos'), 700);
+setTimeout(() => toast('✏️ Lápiz dibuja · 👆 Desliza para cambiar slide · 🤏 Pellizca para zoom'), 700);
 </script>
 </body>
 </html>
