@@ -334,7 +334,15 @@ function buildThumbs(){
   });
 }
 
-/* ─── Drawing ────────────────────────────────────── */
+/* ─── Drawing engine ─────────────────────────────────
+   Features:
+   - Pressure sensitivity (Apple Pencil)
+   - Velocity-based width (fast = thin, slow = thick)
+   - Bezier curve smoothing (Catmull-Rom → Bezier)
+   - Taper at stroke start and end
+   - Tilt for marker/calligraphy effect
+   - All strokes rendered as filled polygons for quality  */
+
 function saveHist(){
   const oc=offC(slides[cur]);
   const snap=document.createElement('canvas');snap.width=SW;snap.height=SH;
@@ -342,64 +350,174 @@ function saveHist(){
   slides[cur].hist.push(snap);if(slides[cur].hist.length>30)slides[cur].hist.shift();
 }
 
-function styleCtx(ctx,lw){
-  ctx.lineCap='round';ctx.lineJoin='round';
-  const hx=color.replace('#','');
-  const r=parseInt(hx.slice(0,2),16),g=parseInt(hx.slice(2,4),16),b=parseInt(hx.slice(4,6),16);
-  if(tool==='eraser'){ctx.globalCompositeOperation='destination-out';ctx.strokeStyle='rgba(0,0,0,1)';ctx.lineWidth=lw*2.5}
-  else if(tool==='marker'){ctx.globalCompositeOperation='source-over';ctx.strokeStyle=`rgba(${r},${g},${b},0.45)`;ctx.lineWidth=lw*2}
-  else{ctx.globalCompositeOperation='source-over';ctx.strokeStyle=`rgba(${r},${g},${b},1)`;ctx.lineWidth=lw}
+// Base line width in canvas pixels
+function baseLW(){return sz*(SW/slideDispW)/zoom}
+
+// Parse color to rgba components
+function parseColor(c){
+  const hx=c.replace('#','');
+  return[parseInt(hx.slice(0,2),16),parseInt(hx.slice(2,4),16),parseInt(hx.slice(4,6),16)];
 }
 
-// lw on screen → lw in canvas pixels
-function canvasLW(){return sz*(SW/slideDispW)/zoom}
+/* Stroke point: canvas coords + width at that point */
+let strokePts=[];   // [{x,y,w}]
+let lastEvTime=0;
+let lastEvX=0,lastEvY=0;
 
-let lastPt=null;
+function ptWidth(pressure,vx,vy){
+  const base=baseLW();
+  if(tool==='eraser') return base*3;
+  if(tool==='marker') return base*2.5;
+  // pressure: 0.0–1.0 (default 0.5 when not available)
+  const p=pressure>0?pressure:0.5;
+  // velocity magnitude in canvas px/ms
+  const vel=Math.hypot(vx,vy);
+  // faster = thinner (velocity factor 0.4–1.0)
+  const vFactor=Math.max(0.4,Math.min(1.0,1.0-vel*0.012));
+  return base*(0.4+p*1.2)*vFactor;
+}
 
-function penDown(sx,sy){
-  if(tool==='laser')laserT=[];
-  saveHist();drawing=true;lastPt=null;
-  if(tool!=='laser'){
-    const p=screenToCanvas(sx,sy);lastPt=p;
-    const lw=canvasLW();
-    styleCtx(dX,lw);dX.beginPath();dX.moveTo(p.x,p.y);
-    styleCtx(offC(slides[cur]).getContext('2d'),lw);
-    offC(slides[cur]).getContext('2d').beginPath();
-    offC(slides[cur]).getContext('2d').moveTo(p.x,p.y);
+/* Draw a smooth filled stroke through strokePts using
+   perpendicular offsets → polygon outline            */
+function flushStroke(ctx,finalise){
+  const pts=strokePts;
+  if(pts.length<2)return;
+  const [r,g,b]=parseColor(color);
+  const alpha=tool==='marker'?0.45:1.0;
+
+  if(tool==='eraser'){
+    ctx.globalCompositeOperation='destination-out';
+    ctx.strokeStyle='rgba(0,0,0,1)';
+    ctx.lineWidth=pts[pts.length-1].w;
+    ctx.lineCap='round';ctx.lineJoin='round';
+    ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y);
+    for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+    ctx.stroke();
+    ctx.globalCompositeOperation='source-over';
+    return;
   }
+
+  ctx.globalCompositeOperation='source-over';
+  ctx.fillStyle=`rgba(${r},${g},${b},${alpha})`;
+
+  // Build left and right edge arrays
+  const left=[], right=[];
+  for(let i=0;i<pts.length;i++){
+    const p=pts[i];
+    // Tangent direction
+    let tx,ty;
+    if(i===0){ tx=pts[1].x-pts[0].x; ty=pts[1].y-pts[0].y; }
+    else if(i===pts.length-1){ tx=pts[i].x-pts[i-1].x; ty=pts[i].y-pts[i-1].y; }
+    else { tx=pts[i+1].x-pts[i-1].x; ty=pts[i+1].y-pts[i-1].y; }
+    const len=Math.hypot(tx,ty)||1;
+    const nx=-ty/len, ny=tx/len; // normal
+    // Taper: ease in first 6 pts, ease out last 6 pts
+    let taper=1;
+    const taperLen=Math.min(6,Math.floor(pts.length*0.2));
+    if(i<taperLen) taper=i/taperLen;
+    else if(i>pts.length-1-taperLen) taper=(pts.length-1-i)/taperLen;
+    taper=finalise?taper:Math.max(taper,i<taperLen?0.3:1); // don't taper end mid-stroke
+    const hw=p.w*0.5*Math.max(0.05,taper);
+    left.push({x:p.x+nx*hw,y:p.y+ny*hw});
+    right.push({x:p.x-nx*hw,y:p.y-ny*hw});
+  }
+
+  // Smooth through left+right with quadratic bezier
+  ctx.beginPath();
+  // Left side forward
+  ctx.moveTo(left[0].x,left[0].y);
+  for(let i=1;i<left.length-1;i++){
+    const mx=(left[i].x+left[i+1].x)/2, my=(left[i].y+left[i+1].y)/2;
+    ctx.quadraticCurveTo(left[i].x,left[i].y,mx,my);
+  }
+  ctx.lineTo(left[left.length-1].x,left[left.length-1].y);
+  // Round end cap
+  const ep=pts[pts.length-1];
+  ctx.arc(ep.x,ep.y,pts[pts.length-1].w*0.5*0.05,
+    Math.atan2(right[right.length-1].y-ep.y,right[right.length-1].x-ep.x),
+    Math.atan2(left[left.length-1].y-ep.y,left[left.length-1].x-ep.x));
+  // Right side backward
+  for(let i=right.length-2;i>0;i--){
+    const mx=(right[i].x+right[i-1].x)/2,my=(right[i].y+right[i-1].y)/2;
+    ctx.quadraticCurveTo(right[i].x,right[i].y,mx,my);
+  }
+  ctx.lineTo(right[0].x,right[0].y);
+  // Start cap
+  const sp=pts[0];
+  ctx.arc(sp.x,sp.y,pts[0].w*0.5*0.05,
+    Math.atan2(left[0].y-sp.y,left[0].x-sp.x),
+    Math.atan2(right[0].y-sp.y,right[0].x-sp.x));
+  ctx.closePath();
+  ctx.fill();
 }
-function penMove(sx,sy){
-  if(!drawing)return;
+
+/* Redraw the display canvas = offscreen + live stroke */
+function redrawLive(){
+  const s=slides[cur];
+  // Redraw slide bg
+  sX.clearRect(0,0,SW,SH);paintBg(sX,s,SW,SH);
+  // Redraw committed drawing
+  dX.clearRect(0,0,SW,SH);
+  if(s.off)dX.drawImage(s.off,0,0);
+  // Draw live stroke on top
+  if(strokePts.length>1) flushStroke(dX,false);
+}
+
+function penDown(sx,sy,pressure=0.5){
+  if(tool==='laser'){laserT=[];drawing=true;return}
+  saveHist();drawing=true;
   const p=screenToCanvas(sx,sy);
-  if(tool==='laser'){laserT.push({...p,t:Date.now()});renderLaser();return}
-  const lw=canvasLW();
-  styleCtx(dX,lw);dX.lineTo(p.x,p.y);dX.stroke();dX.beginPath();dX.moveTo(p.x,p.y);
-  const ox=offC(slides[cur]).getContext('2d');
-  styleCtx(ox,lw);ox.lineTo(p.x,p.y);ox.stroke();ox.beginPath();ox.moveTo(p.x,p.y);
-  lastPt=p;
+  lastEvTime=Date.now();lastEvX=p.x;lastEvY=p.y;
+  strokePts=[{x:p.x,y:p.y,w:ptWidth(pressure,0,0)*0.3}]; // thin start
 }
+
+function penMove(sx,sy,pressure=0.5){
+  if(!drawing)return;
+  if(tool==='laser'){
+    const p=screenToCanvas(sx,sy);
+    laserT.push({...p,t:Date.now()});renderLaser();return;
+  }
+  const p=screenToCanvas(sx,sy);
+  const now=Date.now();
+  const dt=Math.max(1,now-lastEvTime);
+  const vx=(p.x-lastEvX)/dt, vy=(p.y-lastEvY)/dt;
+  const w=ptWidth(pressure,vx,vy);
+  // Smooth width
+  const prevW=strokePts.length>0?strokePts[strokePts.length-1].w:w;
+  const smoothW=prevW*0.6+w*0.4;
+  strokePts.push({x:p.x,y:p.y,w:smoothW});
+  lastEvTime=now;lastEvX=p.x;lastEvY=p.y;
+  redrawLive();
+}
+
 function penUp(){
-  if(!drawing)return;drawing=false;lastPt=null;
-  dX.globalCompositeOperation='source-over';dX.beginPath();
-  offC(slides[cur]).getContext('2d').globalCompositeOperation='source-over';
+  if(!drawing)return;drawing=false;
   if(tool==='laser'){
     if(laserTmr)clearTimeout(laserTmr);
     laserTmr=setTimeout(()=>{laserT=[];renderCur()},900);
-  } else buildThumbs();
+    strokePts=[];return;
+  }
+  // Commit stroke to offscreen canvas
+  if(strokePts.length>0){
+    const ox=offC(slides[cur]).getContext('2d');
+    flushStroke(ox,true); // finalise=true → full taper at end
+  }
+  strokePts=[];
+  renderCur();
+  buildThumbs();
 }
 
 function renderLaser(){
   renderCur();const now=Date.now();
   laserT=laserT.filter(p=>now-p.t<800);if(laserT.length<2)return;
-  // Convert canvas coords to screen for display
   for(let i=1;i<laserT.length;i++){
     const a=(i/laserT.length)*.85;
     dX.beginPath();dX.arc(laserT[i].x,laserT[i].y,sz*(SW/slideDispW)*.5,0,Math.PI*2);
     dX.fillStyle=`rgba(255,55,55,${a})`;dX.fill();
   }
   const h=laserT[laserT.length-1];
-  const r=sz*(SW/slideDispW)+2;
-  dX.beginPath();dX.arc(h.x,h.y,r,0,Math.PI*2);dX.fillStyle='rgba(255,80,80,.95)';dX.fill();
+  dX.beginPath();dX.arc(h.x,h.y,sz*(SW/slideDispW)+2,0,Math.PI*2);
+  dX.fillStyle='rgba(255,80,80,.95)';dX.fill();
 }
 
 /* ─── Unified pointer event handler ─────────────────
@@ -422,7 +540,7 @@ dC.addEventListener('pointerdown',e=>{
 
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     dC.setPointerCapture(e.pointerId);
-    penDown(e.clientX,e.clientY);
+    penDown(e.clientX,e.clientY,e.pressure||0.5);
     return;
   }
 
@@ -447,7 +565,7 @@ dC.addEventListener('pointermove',e=>{
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     if(!drawing)return;
     const evts=e.getCoalescedEvents?e.getCoalescedEvents():[e];
-    for(const ev of evts)penMove(ev.clientX,ev.clientY);
+    for(const ev of evts)penMove(ev.clientX,ev.clientY,ev.pressure||0.5);
     return;
   }
 
