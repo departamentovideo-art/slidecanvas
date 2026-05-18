@@ -426,8 +426,9 @@ function handlePencilDoubleTap(){
   toast('✏️ Doble toque: menú '+(uiVis?'oculto':'visible'));
 }
 
-// WebKit-specific event (Safari 17.2+ on iPadOS 17.2+)
-window.addEventListener('webkitmouseforcechanged',()=>{});
+// Apple Pencil Pro: squeeze gesture (iPadOS 17.5+)
+window.addEventListener('pencilsqueeze', handlePencilDoubleTap);
+// Apple Pencil 2: double-tap (iPadOS 17.2+)
 document.addEventListener('applePencilDoubleTap', handlePencilDoubleTap);
 
 function activeTouches(){return[...ptrs.values()].filter(p=>p.type==='touch')}
