@@ -409,19 +409,9 @@ function renderLaser(){
    We track all active pointers by id so we can detect
    2-finger pinch without touch events.                */
 
-const ptrs=new Map(); // active pointers: id → {x,y,type}
-let ts=null;          // current gesture state
-
-/* ─── Apple Pencil tap → toggle UI ──────────────────
-   A short pen tap (down+up, <200ms, <8px move) toggles
-   the menu. Works with all Pencil models including Pro.
-   The Pencil Pro squeeze also fires as a short tap.   */
-let lastPenTap={t:0,x:0,y:0};
-let penTapDown={t:0,x:0,y:0,active:false};
-
-function toggleMenu(){
-  uiVis?hideUI():showUI();
-}
+const ptrs=new Map();
+let ts=null;
+let lastFingerTap={t:0,x:0,y:0};
 
 function activeTouches(){return[...ptrs.values()].filter(p=>p.type==='touch')}
 
@@ -432,8 +422,6 @@ dC.addEventListener('pointerdown',e=>{
 
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     dC.setPointerCapture(e.pointerId);
-    // Record potential tap start
-    penTapDown={t:Date.now(),x:e.clientX,y:e.clientY,active:true,moved:false};
     penDown(e.clientX,e.clientY);
     return;
   }
@@ -458,11 +446,6 @@ dC.addEventListener('pointermove',e=>{
 
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     if(!drawing)return;
-    // Mark as moved if significant displacement
-    if(penTapDown.active){
-      const d=Math.hypot(e.clientX-penTapDown.x,e.clientY-penTapDown.y);
-      if(d>6)penTapDown.moved=true;
-    }
     const evts=e.getCoalescedEvents?e.getCoalescedEvents():[e];
     for(const ev of evts)penMove(ev.clientX,ev.clientY);
     return;
@@ -499,12 +482,6 @@ dC.addEventListener('pointerup',e=>{
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     ptrs.delete(e.pointerId);
     penUp();
-    // Short tap = down+up under 200ms with no significant move → toggle menu
-    const dt=Date.now()-penTapDown.t;
-    if(penTapDown.active && !penTapDown.moved && dt<200){
-      toggleMenu();
-    }
-    penTapDown.active=false;
     return;
   }
 
@@ -518,10 +495,22 @@ dC.addEventListener('pointerup',e=>{
   if(ts?.type==='swipe'){
     zoomWrap.style.transform=`scale(${zoom}) translate(${panX/zoom}px,${panY/zoom}px)`;
     if(zoom<=1&&ts.moved&&Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>40&&dt<500){
+      // Swipe → change slide
       if(dx<0&&cur<slides.length-1){cur++;renderAll()}
       else if(dx>0&&cur>0){cur--;renderAll()}
     } else if(!ts.moved&&dt<280){
-      uiVis?hideUI():showUI();
+      // Single tap → show menu (if hidden)
+      // Double tap → hide menu (if visible)
+      const now=Date.now();
+      const distFromLast=Math.hypot(e.clientX-lastFingerTap.x, e.clientY-lastFingerTap.y);
+      const isDoubleTap=now-lastFingerTap.t<400&&distFromLast<40;
+      if(isDoubleTap){
+        hideUI();
+        lastFingerTap={t:0,x:0,y:0};
+      } else {
+        if(!uiVis) showUI();
+        lastFingerTap={t:now,x:e.clientX,y:e.clientY};
+      }
     }
     ts=null;
   } else if(ts?.type==='pinch'){
@@ -537,7 +526,7 @@ dC.addEventListener('pointerup',e=>{
 },{passive:false});
 
 dC.addEventListener('pointercancel',e=>{
-  if(e.pointerType==='pen'||e.pointerType==='mouse'){penUp();penTapDown.active=false;}
+  if(e.pointerType==='pen'||e.pointerType==='mouse') penUp();
   ptrs.delete(e.pointerId);
   if(activeTouches().length===0)ts=null;
   zoomWrap.style.transform=`scale(${zoom}) translate(${panX/zoom}px,${panY/zoom}px)`;
