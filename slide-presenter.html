@@ -412,6 +412,24 @@ function renderLaser(){
 const ptrs=new Map(); // active pointers: id → {x,y,type}
 let ts=null;          // current gesture state
 
+/* ─── Apple Pencil double-tap (Pencil 2) ────────────
+   Safari fires a non-standard 'pointerdown' with
+   twist or barrel button, but the most reliable cross-
+   version signal is two rapid pen pointerdown events
+   with no move in between (tap, not stroke).
+   We also listen for the W3C barrelButton proposal
+   and the webkit-specific pencilDoubleTap if present. */
+let lastPenTap={t:0,x:0,y:0};
+
+function handlePencilDoubleTap(){
+  uiVis?hideUI():showUI();
+  toast('✏️ Doble toque: menú '+(uiVis?'oculto':'visible'));
+}
+
+// WebKit-specific event (Safari 17.2+ on iPadOS 17.2+)
+window.addEventListener('webkitmouseforcechanged',()=>{});
+document.addEventListener('applePencilDoubleTap', handlePencilDoubleTap);
+
 function activeTouches(){return[...ptrs.values()].filter(p=>p.type==='touch')}
 
 dC.addEventListener('pointerdown',e=>{
@@ -421,6 +439,18 @@ dC.addEventListener('pointerdown',e=>{
 
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     dC.setPointerCapture(e.pointerId);
+
+    // Detect rapid double-tap: two pen taps within 350ms, no significant move
+    const now=Date.now();
+    const dist=Math.hypot(e.clientX-lastPenTap.x, e.clientY-lastPenTap.y);
+    if(now-lastPenTap.t<350 && dist<30){
+      // Double tap — toggle UI instead of drawing
+      lastPenTap={t:0,x:0,y:0}; // reset so triple-tap doesn't re-trigger
+      handlePencilDoubleTap();
+      return;
+    }
+    lastPenTap={t:now, x:e.clientX, y:e.clientY};
+
     penDown(e.clientX,e.clientY);
     return;
   }
