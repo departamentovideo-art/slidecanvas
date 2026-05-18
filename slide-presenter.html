@@ -412,24 +412,16 @@ function renderLaser(){
 const ptrs=new Map(); // active pointers: id → {x,y,type}
 let ts=null;          // current gesture state
 
-/* ─── Apple Pencil double-tap (Pencil 2) ────────────
-   Safari fires a non-standard 'pointerdown' with
-   twist or barrel button, but the most reliable cross-
-   version signal is two rapid pen pointerdown events
-   with no move in between (tap, not stroke).
-   We also listen for the W3C barrelButton proposal
-   and the webkit-specific pencilDoubleTap if present. */
+/* ─── Apple Pencil tap → toggle UI ──────────────────
+   A short pen tap (down+up, <200ms, <8px move) toggles
+   the menu. Works with all Pencil models including Pro.
+   The Pencil Pro squeeze also fires as a short tap.   */
 let lastPenTap={t:0,x:0,y:0};
+let penTapDown={t:0,x:0,y:0,active:false};
 
-function handlePencilDoubleTap(){
+function toggleMenu(){
   uiVis?hideUI():showUI();
-  toast('✏️ Doble toque: menú '+(uiVis?'oculto':'visible'));
 }
-
-// Apple Pencil Pro: squeeze gesture (iPadOS 17.5+)
-window.addEventListener('pencilsqueeze', handlePencilDoubleTap);
-// Apple Pencil 2: double-tap (iPadOS 17.2+)
-document.addEventListener('applePencilDoubleTap', handlePencilDoubleTap);
 
 function activeTouches(){return[...ptrs.values()].filter(p=>p.type==='touch')}
 
@@ -440,18 +432,8 @@ dC.addEventListener('pointerdown',e=>{
 
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     dC.setPointerCapture(e.pointerId);
-
-    // Detect rapid double-tap: two pen taps within 350ms, no significant move
-    const now=Date.now();
-    const dist=Math.hypot(e.clientX-lastPenTap.x, e.clientY-lastPenTap.y);
-    if(now-lastPenTap.t<350 && dist<30){
-      // Double tap — toggle UI instead of drawing
-      lastPenTap={t:0,x:0,y:0}; // reset so triple-tap doesn't re-trigger
-      handlePencilDoubleTap();
-      return;
-    }
-    lastPenTap={t:now, x:e.clientX, y:e.clientY};
-
+    // Record potential tap start
+    penTapDown={t:Date.now(),x:e.clientX,y:e.clientY,active:true,moved:false};
     penDown(e.clientX,e.clientY);
     return;
   }
@@ -476,6 +458,11 @@ dC.addEventListener('pointermove',e=>{
 
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     if(!drawing)return;
+    // Mark as moved if significant displacement
+    if(penTapDown.active){
+      const d=Math.hypot(e.clientX-penTapDown.x,e.clientY-penTapDown.y);
+      if(d>6)penTapDown.moved=true;
+    }
     const evts=e.getCoalescedEvents?e.getCoalescedEvents():[e];
     for(const ev of evts)penMove(ev.clientX,ev.clientY);
     return;
@@ -512,6 +499,12 @@ dC.addEventListener('pointerup',e=>{
   if(e.pointerType==='pen'||e.pointerType==='mouse'){
     ptrs.delete(e.pointerId);
     penUp();
+    // Short tap = down+up under 200ms with no significant move → toggle menu
+    const dt=Date.now()-penTapDown.t;
+    if(penTapDown.active && !penTapDown.moved && dt<200){
+      toggleMenu();
+    }
+    penTapDown.active=false;
     return;
   }
 
@@ -544,7 +537,7 @@ dC.addEventListener('pointerup',e=>{
 },{passive:false});
 
 dC.addEventListener('pointercancel',e=>{
-  if(e.pointerType==='pen'||e.pointerType==='mouse') penUp();
+  if(e.pointerType==='pen'||e.pointerType==='mouse'){penUp();penTapDown.active=false;}
   ptrs.delete(e.pointerId);
   if(activeTouches().length===0)ts=null;
   zoomWrap.style.transform=`scale(${zoom}) translate(${panX/zoom}px,${panY/zoom}px)`;
