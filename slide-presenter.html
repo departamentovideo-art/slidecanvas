@@ -243,20 +243,9 @@ function slideAR(){
 }
 
 function layout(){
-  // On iOS PWA, window.innerWidth/Height can be wrong.
-  // Use the largest available value across all APIs.
-  stageW = Math.max(
-    window.innerWidth,
-    document.documentElement.clientWidth,
-    screen.width
-  );
-  stageH = Math.max(
-    window.innerHeight,
-    document.documentElement.clientHeight,
-    screen.height
-  );
+  stageW = window.innerWidth;
+  stageH = window.innerHeight;
 
-  // Force stage element to fill everything
   stage.style.width = stageW + 'px';
   stage.style.height = stageH + 'px';
 
@@ -977,10 +966,12 @@ function toast(msg){
 
 /* ─── Init ───────────────────────────────────────── */
 DEFBG.slice(0,3).forEach(c=>slides.push(mkSlide(c)));
-layout();
-setTimeout(()=>showUI(true),400);
-// Debug: show detected dimensions
-setTimeout(()=>toast(`Pantalla: ${stageW}×${stageH} | inner: ${window.innerWidth}×${window.innerHeight} | screen: ${screen.width}×${screen.height}`),800);
+// Delay layout so iOS PWA has time to settle final viewport dimensions
+setTimeout(()=>{
+  layout();
+  setTimeout(()=>showUI(true), 200);
+  setTimeout(()=>toast(`${stageW}×${stageH}`), 500);
+}, 100);
 </script>
 </body>
 </html>
