@@ -25,15 +25,14 @@ html,body{
   overflow:hidden;background:#000;
   font-family:'DM Sans',system-ui,sans-serif;color:var(--text);
   touch-action:none;-webkit-user-select:none;user-select:none;
+  margin:0;padding:0;
 }
 
-/* stage covers EVERYTHING including under status bar */
+/* stage must cover every pixel */
 #stage{
   position:fixed;
-  top:0;left:0;
-  width:100vw;
-  height:100vh;
-  /* On iOS with viewport-fit=cover, 100vh = full screen incl. status bar */
+  top:0;left:0;right:0;bottom:0;
+  width:100%;height:100%;
   overflow:hidden;background:#000;
 }
 
@@ -244,31 +243,42 @@ function slideAR(){
 }
 
 function layout(){
-  stageW=window.innerWidth;
-  stageH=window.innerHeight;
-  stage.style.width=stageW+'px';
-  stage.style.height=stageH+'px';
+  // On iOS PWA, window.innerWidth/Height can be wrong.
+  // Use the largest available value across all APIs.
+  stageW = Math.max(
+    window.innerWidth,
+    document.documentElement.clientWidth,
+    screen.width
+  );
+  stageH = Math.max(
+    window.innerHeight,
+    document.documentElement.clientHeight,
+    screen.height
+  );
 
-  const ar=slideAR();
-  if(stageW/stageH>ar){
-    slideDispH=stageH; slideDispW=stageH*ar;
+  // Force stage element to fill everything
+  stage.style.width = stageW + 'px';
+  stage.style.height = stageH + 'px';
+
+  const ar = slideAR();
+  if(stageW / stageH > ar){
+    slideDispH = stageH; slideDispW = stageH * ar;
   } else {
-    slideDispW=stageW; slideDispH=stageW/ar;
+    slideDispW = stageW; slideDispH = stageW / ar;
   }
-  slideOffX=(stageW-slideDispW)/2;
-  slideOffY=(stageH-slideDispH)/2;
+  slideOffX = (stageW - slideDispW) / 2;
+  slideOffY = (stageH - slideDispH) / 2;
 
-  // Resize canvases to match current slide's pixel dimensions
-  const w=cW(),h=cH();
-  sC.width=dC.width=w;
-  sC.height=dC.height=h;
-  sC.style.width=dC.style.width=slideDispW+'px';
-  sC.style.height=dC.style.height=slideDispH+'px';
+  const w = cW(), h = cH();
+  sC.width = dC.width = w;
+  sC.height = dC.height = h;
+  sC.style.width = dC.style.width = slideDispW + 'px';
+  sC.style.height = dC.style.height = slideDispH + 'px';
 
-  zoomWrap.style.width=slideDispW+'px';
-  zoomWrap.style.height=slideDispH+'px';
-  zoomWrap.style.left=slideOffX+'px';
-  zoomWrap.style.top=slideOffY+'px';
+  zoomWrap.style.width = slideDispW + 'px';
+  zoomWrap.style.height = slideDispH + 'px';
+  zoomWrap.style.left = slideOffX + 'px';
+  zoomWrap.style.top = slideOffY + 'px';
 
   applyZoomTransform();
   renderCur();
@@ -969,12 +979,8 @@ function toast(msg){
 DEFBG.slice(0,3).forEach(c=>slides.push(mkSlide(c)));
 layout();
 setTimeout(()=>showUI(true),400);
-const isStandalone=window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches;
-if(!isStandalone){
-  setTimeout(()=>toast('Para pantalla completa: Safari → Compartir → Añadir a pantalla de inicio'),1200);
-} else {
-  setTimeout(()=>toast('✏️ Lápiz dibuja · 👆 Desliza para cambiar · 🤏 Pellizca para zoom'),700);
-}
+// Debug: show detected dimensions
+setTimeout(()=>toast(`Pantalla: ${stageW}×${stageH} | inner: ${window.innerWidth}×${window.innerHeight} | screen: ${screen.width}×${screen.height}`),800);
 </script>
 </body>
 </html>
