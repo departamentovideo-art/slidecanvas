@@ -217,15 +217,22 @@ const zoomWrap=document.getElementById('zoomWrap');
 const sC=document.getElementById('sC'),dC=document.getElementById('dC');
 const sX=sC.getContext('2d'),dX=dC.getContext('2d');
 
-/* ─── Layout: fit slide (16:9) inside stage ──────────
-   The canvas pixel size is always SW×SH.
-   We CSS-scale the wrapper to fit the screen.        */
+/* ─── Layout: fit current slide inside stage ─────────
+   Each slide can have its own aspect ratio (e.g. 4:3
+   for imported PDFs, 16:9 for default slides).
+   SW×SH are the offscreen canvas dimensions and adapt
+   to the current slide's AR.                          */
 let stageW=0,stageH=0,slideDispW=0,slideDispH=0,slideOffX=0,slideOffY=0;
+
+function slideAR(){
+  // Use current slide's stored AR, default 16:9
+  return slides[cur]?.ar || (SW/SH);
+}
 
 function layout(){
   stageW=stage.clientWidth;
   stageH=stage.clientHeight;
-  const ar=SW/SH;
+  const ar=slideAR();
   if(stageW/stageH>ar){
     slideDispH=stageH; slideDispW=stageH*ar;
   } else {
@@ -313,7 +320,7 @@ function renderCur(){
   dX.clearRect(0,0,SW,SH);if(s.off)dX.drawImage(s.off,0,0);
   document.getElementById('cnt').textContent=`${cur+1} / ${slides.length}`;
 }
-function renderAll(){renderCur();buildThumbs()}
+function renderAll(){layout();renderCur();buildThumbs()}
 
 /* ─── Thumbnails ─────────────────────────────────── */
 function buildThumbs(){
@@ -748,6 +755,7 @@ document.getElementById('fPdf').addEventListener('change',async function(){
       showLoad(`Convirtiendo página ${i} de ${total}…`,Math.round(i/total*90));
       const page=await pdf.getPage(i);
       const vp=page.getViewport({scale:1});
+      const pageAR=vp.width/vp.height;
       const scale=Math.min(SW/vp.width,SH/vp.height);
       const viewport=page.getViewport({scale});
       const tmp=document.createElement('canvas');
@@ -755,10 +763,10 @@ document.getElementById('fPdf').addEventListener('change',async function(){
       await page.render({canvasContext:tmp.getContext('2d'),viewport}).promise;
       const img=new Image();img.src=tmp.toDataURL();
       await new Promise(res=>{img.onload=res});
-      const s=mkSlide('#111118');s.bgImg=img;
+      const s=mkSlide('#111118');s.bgImg=img;s.ar=pageAR;
       slides.splice(insertAt+i-1,0,s);
     }
-    cur=insertAt;hideLoad();renderAll();
+    cur=insertAt;hideLoad();layout();renderAll();
     toast(`✓ PDF: ${total} página${total>1?'s':''}`);showUI();
   }catch(e){hideLoad();toast('Error al leer el PDF');console.error(e)}
 });
@@ -772,6 +780,20 @@ document.getElementById('fPptx').addEventListener('change',async function(){
   try{
     const ab=await file.arrayBuffer();
     const zip=await JSZip.loadAsync(ab);
+
+    // Detect presentation AR from ppt/presentation.xml
+    let pptxAR=4/3; // default 4:3
+    if(zip.files['ppt/presentation.xml']){
+      const presXml=await zip.files['ppt/presentation.xml'].async('string');
+      const presDoc=new DOMParser().parseFromString(presXml,'text/xml');
+      const sldSz=presDoc.getElementsByTagNameNS('*','sldSz')[0];
+      if(sldSz){
+        const cx=parseInt(sldSz.getAttribute('cx')||'9144000');
+        const cy=parseInt(sldSz.getAttribute('cy')||'6858000');
+        pptxAR=cx/cy;
+      }
+    }
+
     const slideEntries=Object.keys(zip.files)
       .filter(k=>k.match(/^ppt\/slides\/slide\d+\.xml$/))
       .sort((a,b)=>parseInt(a.match(/\d+/)[0])-parseInt(b.match(/\d+/)[0]));
@@ -831,9 +853,9 @@ document.getElementById('fPptx').addEventListener('change',async function(){
       }
       const img=new Image();img.src=tmp.toDataURL('image/jpeg',0.92);
       await new Promise(res=>{img.onload=res});
-      const s=mkSlide('#111118');s.bgImg=img;slides.splice(insertAt+i,0,s);
+      const s=mkSlide('#111118');s.bgImg=img;s.ar=pptxAR;slides.splice(insertAt+i,0,s);
     }
-    cur=insertAt;hideLoad();renderAll();
+    cur=insertAt;hideLoad();layout();renderAll();
     toast(`✓ PPTX: ${total} diapositiva${total>1?'s':''}`);showUI();
   }catch(e){hideLoad();toast('Error al leer el PPTX');console.error(e)}
 });
