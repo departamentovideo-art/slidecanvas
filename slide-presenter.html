@@ -244,12 +244,8 @@ function slideAR(){
 }
 
 function layout(){
-  // Use window.innerWidth/Height — on iOS with viewport-fit=cover
-  // these give the true full-screen dimensions including under status bar
   stageW=window.innerWidth;
   stageH=window.innerHeight;
-
-  // Update stage element size explicitly
   stage.style.width=stageW+'px';
   stage.style.height=stageH+'px';
 
@@ -262,13 +258,13 @@ function layout(){
   slideOffX=(stageW-slideDispW)/2;
   slideOffY=(stageH-slideDispH)/2;
 
-  // Canvas pixel size fixed; CSS size = display size
-  sC.width=dC.width=SW;
-  sC.height=dC.height=SH;
+  // Resize canvases to match current slide's pixel dimensions
+  const w=cW(),h=cH();
+  sC.width=dC.width=w;
+  sC.height=dC.height=h;
   sC.style.width=dC.style.width=slideDispW+'px';
   sC.style.height=dC.style.height=slideDispH+'px';
 
-  // Wrapper positioned at offset
   zoomWrap.style.width=slideDispW+'px';
   zoomWrap.style.height=slideDispH+'px';
   zoomWrap.style.left=slideOffX+'px';
@@ -310,17 +306,28 @@ function applyZoomTransform(){
    5. shift origin back to top-left
    6. scale display px → canvas px                    */
 function screenToCanvas(sx,sy){
-  const cx=slideOffX+slideDispW/2; // wrapper center X on screen
-  const cy=slideOffY+slideDispH/2; // wrapper center Y on screen
-  // Undo CSS transform: scale from center + translate
+  const cx=slideOffX+slideDispW/2;
+  const cy=slideOffY+slideDispH/2;
   const lx=(sx-cx)/zoom - panX/zoom + slideDispW/2;
   const ly=(sy-cy)/zoom - panY/zoom + slideDispH/2;
-  return {x:lx*SW/slideDispW, y:ly*SH/slideDispH};
+  return {x:lx*cW()/slideDispW, y:ly*cH()/slideDispH};
 }
 
 /* ─── Slide model ────────────────────────────────── */
-function mkSlide(bg){return{bg:bg||DEFBG[slides.length%DEFBG.length],bgImg:null,off:null,hist:[]}}
-function offC(s){if(!s.off){const c=document.createElement('canvas');c.width=SW;c.height=SH;s.off=c;}return s.off}
+function mkSlide(bg){return{bg:bg||DEFBG[slides.length%DEFBG.length],bgImg:null,off:null,hist:[],ar:SW/SH}}
+
+function slideW(s){return s.ar>=1 ? SW : Math.round(SH*s.ar)}
+function slideH(s){return s.ar>=1 ? Math.round(SW/s.ar) : SH}
+
+function offC(s){
+  if(!s.off){
+    const c=document.createElement('canvas');
+    c.width=slideW(s);c.height=slideH(s);
+    s.off=c;
+  }
+  return s.off;
+}
+
 function addSlide(bg){slides.push(mkSlide(bg));cur=slides.length-1;layout();renderAll()}
 function delSlide(i){
   if(slides.length<=1){toast('Mínimo una diapositiva');return}
@@ -330,15 +337,22 @@ function delSlide(i){
 /* ─── Render ─────────────────────────────────────── */
 function paintBg(ctx,s,w,h){
   if(s.bgImg){
-    const sc=Math.max(w/s.bgImg.naturalWidth,h/s.bgImg.naturalHeight);
+    // contain — never crop, fill any remaining area with black
+    ctx.fillStyle='#000';ctx.fillRect(0,0,w,h);
+    const sc=Math.min(w/s.bgImg.naturalWidth,h/s.bgImg.naturalHeight);
     const dw=s.bgImg.naturalWidth*sc,dh=s.bgImg.naturalHeight*sc;
     ctx.drawImage(s.bgImg,(w-dw)/2,(h-dh)/2,dw,dh);
   } else {ctx.fillStyle=s.bg;ctx.fillRect(0,0,w,h)}
 }
+
+function cW(){return slideW(slides[cur])}
+function cH(){return slideH(slides[cur])}
+
 function renderCur(){
   const s=slides[cur];
-  sX.clearRect(0,0,SW,SH);paintBg(sX,s,SW,SH);
-  dX.clearRect(0,0,SW,SH);if(s.off)dX.drawImage(s.off,0,0);
+  const w=cW(),h=cH();
+  sX.clearRect(0,0,w,h);paintBg(sX,s,w,h);
+  dX.clearRect(0,0,w,h);if(s.off)dX.drawImage(s.off,0,0);
   document.getElementById('cnt').textContent=`${cur+1} / ${slides.length}`;
 }
 function renderAll(){renderCur();buildThumbs()}
@@ -354,11 +368,13 @@ function buildThumbs(){
   const dr=document.getElementById('drawer');
   dr.querySelectorAll('.thi').forEach(e=>e.remove());
   const ab=document.getElementById('dAdd');
-  const TW=141,TH=Math.round(TW*SH/SW);
+  const TW=141,TH=Math.round(TW*(1/s.ar)||Math.round(TW*SH/SW));
   slides.forEach((s,i)=>{
+    const sAR=s.ar||SW/SH;
+    const tH=Math.round(TW/sAR);
     const div=document.createElement('div');div.className='thi'+(i===cur?' act':'');
-    const c=document.createElement('canvas');c.width=TW;c.height=TH;
-    const ctx=c.getContext('2d');paintBg(ctx,s,TW,TH);if(s.off)ctx.drawImage(s.off,0,0,TW,TH);
+    const c=document.createElement('canvas');c.width=TW;c.height=tH;
+    const ctx=c.getContext('2d');paintBg(ctx,s,TW,tH);if(s.off)ctx.drawImage(s.off,0,0,TW,tH);
     div.appendChild(c);
     const num=document.createElement('span');num.className='thn';num.textContent=i+1;div.appendChild(num);
     const del=document.createElement('button');del.className='thd';del.textContent='×';
@@ -378,14 +394,15 @@ function buildThumbs(){
    - All strokes rendered as filled polygons for quality  */
 
 function saveHist(){
-  const oc=offC(slides[cur]);
-  const snap=document.createElement('canvas');snap.width=SW;snap.height=SH;
+  const s=slides[cur];const oc=offC(s);
+  const snap=document.createElement('canvas');
+  snap.width=slideW(s);snap.height=slideH(s);
   snap.getContext('2d').drawImage(oc,0,0);
-  slides[cur].hist.push(snap);if(slides[cur].hist.length>30)slides[cur].hist.shift();
+  s.hist.push(snap);if(s.hist.length>30)s.hist.shift();
 }
 
 // Base line width in canvas pixels
-function baseLW(){return sz*(SW/slideDispW)/zoom}
+function baseLW(){return sz*(cW()/slideDispW)/zoom}
 
 // Parse color to rgba components
 function parseColor(c){
@@ -487,14 +504,10 @@ function flushStroke(ctx,finalise){
 
 /* Redraw the display canvas = offscreen + live stroke */
 function redrawLive(){
-  const s=slides[cur];
-  // Redraw slide bg
-  sX.clearRect(0,0,SW,SH);paintBg(sX,s,SW,SH);
-  // Redraw committed drawing
-  dX.clearRect(0,0,SW,SH);
-  if(s.off)dX.drawImage(s.off,0,0);
-  // Draw live stroke on top
-  if(strokePts.length>1) flushStroke(dX,false);
+  const s=slides[cur];const w=cW(),h=cH();
+  sX.clearRect(0,0,w,h);paintBg(sX,s,w,h);
+  dX.clearRect(0,0,w,h);if(s.off)dX.drawImage(s.off,0,0);
+  if(strokePts.length>1)flushStroke(dX,false);
 }
 
 function penDown(sx,sy,pressure=0.5){
@@ -531,10 +544,9 @@ function penUp(){
     laserTmr=setTimeout(()=>{laserT=[];renderCur()},900);
     strokePts=[];return;
   }
-  // Commit stroke to offscreen canvas
   if(strokePts.length>0){
     const ox=offC(slides[cur]).getContext('2d');
-    flushStroke(ox,true); // finalise=true → full taper at end
+    flushStroke(ox,true);
   }
   strokePts=[];
   renderCur();
@@ -544,13 +556,14 @@ function penUp(){
 function renderLaser(){
   renderCur();const now=Date.now();
   laserT=laserT.filter(p=>now-p.t<800);if(laserT.length<2)return;
+  const r=sz*(cW()/slideDispW)*.5;
   for(let i=1;i<laserT.length;i++){
     const a=(i/laserT.length)*.85;
-    dX.beginPath();dX.arc(laserT[i].x,laserT[i].y,sz*(SW/slideDispW)*.5,0,Math.PI*2);
+    dX.beginPath();dX.arc(laserT[i].x,laserT[i].y,r,0,Math.PI*2);
     dX.fillStyle=`rgba(255,55,55,${a})`;dX.fill();
   }
   const h=laserT[laserT.length-1];
-  dX.beginPath();dX.arc(h.x,h.y,sz*(SW/slideDispW)+2,0,Math.PI*2);
+  dX.beginPath();dX.arc(h.x,h.y,r+2,0,Math.PI*2);
   dX.fillStyle='rgba(255,80,80,.95)';dX.fill();
 }
 
@@ -729,10 +742,10 @@ document.getElementById('bTh').addEventListener('click',()=>{document.getElement
 document.getElementById('bUndo').addEventListener('click',()=>{
   const h=slides[cur].hist;if(!h.length){toast('Sin más acciones');return}
   const prev=h.pop(),oc=offC(slides[cur]),ctx=oc.getContext('2d');
-  ctx.clearRect(0,0,SW,SH);ctx.drawImage(prev,0,0);renderCur();buildThumbs();showUI();
+  ctx.clearRect(0,0,slideW(slides[cur]),slideH(slides[cur]));ctx.drawImage(prev,0,0);renderCur();buildThumbs();showUI();
 });
 document.getElementById('bClr').addEventListener('click',()=>{
-  saveHist();offC(slides[cur]).getContext('2d').clearRect(0,0,SW,SH);renderCur();buildThumbs();showUI();
+  saveHist();offC(slides[cur]).getContext('2d').clearRect(0,0,slideW(slides[cur]),slideH(slides[cur]));renderCur();buildThumbs();showUI();
 });
 
 /* ─── Image insert ───────────────────────────────── */
@@ -742,9 +755,10 @@ document.getElementById('fImg').addEventListener('change',function(){
   const fr=new FileReader();fr.onload=ev=>{
     const img=new Image();img.onload=()=>{
       saveHist();const ctx=offC(slides[cur]).getContext('2d');
-      const sc=Math.min(SW/img.width,SH/img.height)*.65;
+      const w=cW(),h=cH();
+      const sc=Math.min(w/img.width,h/img.height)*.65;
       ctx.globalCompositeOperation='source-over';
-      ctx.drawImage(img,(SW-img.width*sc)/2,(SH-img.height*sc)/2,img.width*sc,img.height*sc);
+      ctx.drawImage(img,(w-img.width*sc)/2,(h-img.height*sc)/2,img.width*sc,img.height*sc);
       renderCur();buildThumbs();
     };img.src=ev.target.result;
   };fr.readAsDataURL(f);this.value='';
@@ -837,7 +851,9 @@ document.getElementById('fPptx').addEventListener('change',async function(){
         const relDoc=parser.parseFromString(await zip.files[relPath].async('string'),'text/xml');
         relDoc.querySelectorAll('Relationship').forEach(r=>{rels[r.getAttribute('Id')]=r.getAttribute('Target')});
       }
-      const tmp=document.createElement('canvas');tmp.width=SW;tmp.height=SH;
+      const tW=pptxAR>=1?SW:Math.round(SH*pptxAR);
+      const tH=pptxAR>=1?Math.round(SW/pptxAR):SH;
+      const tmp=document.createElement('canvas');tmp.width=tW;tmp.height=tH;
       const ctx=tmp.getContext('2d');
       let bgColor='#1a1a2e';
       const bgEls=xmlDoc.getElementsByTagNameNS('*','bg');
@@ -845,7 +861,7 @@ document.getElementById('fPptx').addEventListener('change',async function(){
         const sf=bgEls[0].getElementsByTagNameNS('*','solidFill')[0];
         if(sf){const sc=sf.getElementsByTagNameNS('*','srgbClr')[0];if(sc)bgColor='#'+sc.getAttribute('val')}
       }
-      ctx.fillStyle=bgColor;ctx.fillRect(0,0,SW,SH);
+      ctx.fillStyle=bgColor;ctx.fillRect(0,0,tW,tH);
       for(const bf of xmlDoc.getElementsByTagNameNS('*','blipFill')){
         const blip=bf.getElementsByTagNameNS('*','blip')[0];if(!blip)continue;
         const rEmbed=blip.getAttribute('r:embed')||blip.getAttribute('embed');
@@ -858,7 +874,7 @@ document.getElementById('fPptx').addEventListener('change',async function(){
           const mime=ext==='jpg'||ext==='jpeg'?'image/jpeg':ext==='png'?'image/png':'image/'+ext;
           const img=new Image();img.src=`data:${mime};base64,${md}`;
           await new Promise(res=>{img.onload=res;img.onerror=res});
-          if(img.width>0){const sc=Math.min(SW/img.width,SH/img.height);ctx.drawImage(img,(SW-img.width*sc)/2,(SH-img.height*sc)/2,img.width*sc,img.height*sc)}
+          if(img.width>0){const sc=Math.min(tW/img.width,tH/img.height);ctx.drawImage(img,(tW-img.width*sc)/2,(tH-img.height*sc)/2,img.width*sc,img.height*sc)}
         }catch(e){}
       }
       let yOff=80;const drawn=new Set();
@@ -869,14 +885,14 @@ document.getElementById('fPptx').addEventListener('change',async function(){
           text=text.trim();if(!text||drawn.has(text))continue;drawn.add(text);
           let fs=28;
           const rPr=txb.getElementsByTagNameNS('*','rPr')[0];
-          if(rPr){const s=rPr.getAttribute('sz');if(s)fs=Math.round(parseInt(s)/100*(SH/720))}
+          if(rPr){const s=rPr.getAttribute('sz');if(s)fs=Math.round(parseInt(s)/100*(tH/720))}
           fs=Math.max(16,Math.min(fs,72));
           let tc='#ffffff';
           if(rPr){const sf=rPr.getElementsByTagNameNS('*','solidFill')[0];if(sf){const sc=sf.getElementsByTagNameNS('*','srgbClr')[0];if(sc)tc='#'+sc.getAttribute('val')}}
           ctx.font=`${fs}px system-ui,sans-serif`;ctx.fillStyle=tc;ctx.textAlign='center';
-          ctx.fillText(text,SW/2,yOff+fs,SW-120);yOff+=fs+12;if(yOff>SH-60)break;
+          ctx.fillText(text,tW/2,yOff+fs,tW-120);yOff+=fs+12;if(yOff>tH-60)break;
         }
-        if(yOff>SH-60)break;
+        if(yOff>tH-60)break;
       }
       const img=new Image();img.src=tmp.toDataURL('image/jpeg',0.92);
       await new Promise(res=>{img.onload=res});
