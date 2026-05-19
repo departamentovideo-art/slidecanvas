@@ -22,16 +22,10 @@
 }
 html,body{width:100%;height:100%;overflow:hidden;background:#000;
   font-family:'DM Sans',system-ui,sans-serif;color:var(--text);
-  touch-action:none;-webkit-user-select:none;user-select:none;
-  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  touch-action:none;-webkit-user-select:none;user-select:none}
 
 /* ── The viewport container ── */
-#stage{position:fixed;
-  top:env(safe-area-inset-top,0px);
-  left:env(safe-area-inset-left,0px);
-  right:env(safe-area-inset-right,0px);
-  bottom:env(safe-area-inset-bottom,0px);
-  overflow:hidden;background:#000}
+#stage{position:fixed;inset:0;overflow:hidden;background:#000}
 
 /* ── Zoom wrapper — we transform this, NOT the canvases ── */
 #zoomWrap{
@@ -310,10 +304,10 @@ function screenToCanvas(sx,sy){
 /* ─── Slide model ────────────────────────────────── */
 function mkSlide(bg){return{bg:bg||DEFBG[slides.length%DEFBG.length],bgImg:null,off:null,hist:[]}}
 function offC(s){if(!s.off){const c=document.createElement('canvas');c.width=SW;c.height=SH;s.off=c;}return s.off}
-function addSlide(bg){slides.push(mkSlide(bg));cur=slides.length-1;renderAll()}
+function addSlide(bg){slides.push(mkSlide(bg));cur=slides.length-1;layout();renderAll()}
 function delSlide(i){
   if(slides.length<=1){toast('Mínimo una diapositiva');return}
-  slides.splice(i,1);if(cur>=slides.length)cur=slides.length-1;renderAll()
+  slides.splice(i,1);if(cur>=slides.length)cur=slides.length-1;layout();renderAll()
 }
 
 /* ─── Render ─────────────────────────────────────── */
@@ -330,7 +324,13 @@ function renderCur(){
   dX.clearRect(0,0,SW,SH);if(s.off)dX.drawImage(s.off,0,0);
   document.getElementById('cnt').textContent=`${cur+1} / ${slides.length}`;
 }
-function renderAll(){layout();renderCur();buildThumbs()}
+function renderAll(){renderCur();buildThumbs()}
+
+function switchSlide(n){
+  cur=n;
+  layout(); // recalc AR for new slide
+  renderAll();
+}
 
 /* ─── Thumbnails ─────────────────────────────────── */
 function buildThumbs(){
@@ -346,7 +346,7 @@ function buildThumbs(){
     const num=document.createElement('span');num.className='thn';num.textContent=i+1;div.appendChild(num);
     const del=document.createElement('button');del.className='thd';del.textContent='×';
     del.addEventListener('click',e=>{e.stopPropagation();delSlide(i)});div.appendChild(del);
-    div.addEventListener('click',()=>{cur=i;renderAll()});
+    div.addEventListener('click',()=>switchSlide(i));
     dr.insertBefore(div,ab);
   });
 }
@@ -631,8 +631,8 @@ dC.addEventListener('pointerup',e=>{
     zoomWrap.style.transform=`scale(${zoom}) translate(${panX/zoom}px,${panY/zoom}px)`;
     if(zoom<=1&&ts.moved&&Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>40&&dt<500){
       // Swipe → change slide
-      if(dx<0&&cur<slides.length-1){cur++;renderAll()}
-      else if(dx>0&&cur>0){cur--;renderAll()}
+      if(dx<0&&cur<slides.length-1){switchSlide(cur+1)}
+      else if(dx>0&&cur>0){switchSlide(cur-1)}
     } else if(!ts.moved&&dt<280){
       // Single tap → show menu (if hidden)
       // Double tap → hide menu (if visible)
@@ -703,8 +703,8 @@ function setTool(t){
 Object.entries({tPen:'pen',tMark:'marker',tErase:'eraser',tLaser:'laser'})
   .forEach(([id,t])=>document.getElementById(id).addEventListener('click',()=>{setTool(t);showUI()}));
 
-document.getElementById('bPrev').addEventListener('click',()=>{if(cur>0){cur--;renderAll()}showUI()});
-document.getElementById('bNext').addEventListener('click',()=>{if(cur<slides.length-1){cur++;renderAll()}showUI()});
+document.getElementById('bPrev').addEventListener('click',()=>{if(cur>0){switchSlide(cur-1)}showUI()});
+document.getElementById('bNext').addEventListener('click',()=>{if(cur<slides.length-1){switchSlide(cur+1)}showUI()});
 document.getElementById('bAdd').addEventListener('click',()=>{addSlide();showUI()});
 document.getElementById('dAdd').addEventListener('click',()=>{addSlide();showUI()});
 document.getElementById('bTh').addEventListener('click',()=>{document.getElementById('drawer').classList.toggle('open');showUI(false)});
@@ -919,8 +919,8 @@ document.addEventListener('webkitfullscreenchange',()=>{bFs.textContent=document
 
 /* ─── Keyboard ───────────────────────────────────── */
 document.addEventListener('keydown',e=>{
-  if(e.key==='ArrowRight'||e.key===' '){if(cur<slides.length-1){cur++;renderAll()}}
-  if(e.key==='ArrowLeft'){if(cur>0){cur--;renderAll()}}
+  if(e.key==='ArrowRight'||e.key===' '){if(cur<slides.length-1)switchSlide(cur+1)}
+  if(e.key==='ArrowLeft'){if(cur>0)switchSlide(cur-1)}
   if(e.key==='Escape')hideUI();
   showUI();
 });
@@ -936,7 +936,12 @@ function toast(msg){
 DEFBG.slice(0,3).forEach(c=>slides.push(mkSlide(c)));
 layout();
 setTimeout(()=>showUI(true),400);
-setTimeout(()=>toast('✏️ Lápiz dibuja · 👆 Desliza para cambiar · 🤏 Pellizca para zoom'),700);
+const isStandalone=window.navigator.standalone===true||window.matchMedia('(display-mode: standalone)').matches;
+if(!isStandalone){
+  setTimeout(()=>toast('Para pantalla completa: Safari → Compartir → Añadir a pantalla de inicio'),1200);
+} else {
+  setTimeout(()=>toast('✏️ Lápiz dibuja · 👆 Desliza para cambiar · 🤏 Pellizca para zoom'),700);
+}
 </script>
 </body>
 </html>
