@@ -590,77 +590,55 @@ let lastFingerTap={t:0,x:0,y:0};
 
 function activeTouches(){return[...ptrs.values()].filter(p=>p.type==='touch')}
 
-// Block pen from interacting with any UI element
-document.addEventListener('pointerdown', e=>{
-  if(e.pointerType!=='pen') return;
-  // If pen lands on UI, prevent the click but still draw on canvas
-  const el=document.elementFromPoint(e.clientX,e.clientY);
-  if(el && el.closest('#ui,#bgP,#loadOv')){
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  }
-}, {capture:true, passive:false});
+/* ─── Pen-only drawing layer ─────────────────────────
+   A transparent div sits above everything. It receives
+   ALL pointer events. Pen → draw. Touch → pass through
+   to UI and canvas below via pointer-events:none trick.*/
+const penLayer=document.createElement('div');
+penLayer.style.cssText='position:fixed;inset:0;z-index:999;touch-action:none;';
+document.body.appendChild(penLayer);
 
-document.addEventListener('pointerup', e=>{
-  if(e.pointerType!=='pen') return;
-  const el=document.elementFromPoint(e.clientX,e.clientY);
-  if(el && el.closest('#ui,#bgP,#loadOv')){
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  }
-}, {capture:true, passive:false});
-
-document.addEventListener('click', e=>{
-  if(e.pointerType==='pen'){
-    e.preventDefault();
-    e.stopImmediatePropagation();
-  }
-}, {capture:true});
-
-dC.addEventListener('pointerdown',e=>{
-  e.preventDefault();
-  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
-
-  if(e.pointerType==='pen'){
-    // Pen always draws, regardless of where it lands
-    dC.setPointerCapture(e.pointerId);
-    penDown(e.clientX,e.clientY,e.pressure||0.5);
+penLayer.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='touch'){
+    // Let touch events fall through to elements below
+    penLayer.style.pointerEvents='none';
+    setTimeout(()=>penLayer.style.pointerEvents='auto',50);
     return;
   }
-
-  if(e.pointerType==='mouse'){
-    if(hitUI(e)) return;
-    dC.setPointerCapture(e.pointerId);
+  if(e.pointerType==='pen'||e.pointerType==='mouse'){
+    e.preventDefault();
+    penLayer.setPointerCapture(e.pointerId);
+    ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
     penDown(e.clientX,e.clientY,e.pressure||0.5);
-    return;
-  }
-
-  // Touch finger — gestures only
-  if(hitUI(e)) return;
-  const fingers=activeTouches();
-  if(fingers.length===1){
-    ts={type:'swipe',x0:e.clientX,y0:e.clientY,
-        moved:false,t:Date.now(),px0:panX,py0:panY};
-  } else if(fingers.length===2){
-    const [a,b]=fingers;
-    ts={type:'pinch',d0:Math.hypot(b.x-a.x,b.y-a.y),
-        z0:zoom,px0:panX,py0:panY,
-        mx0:(a.x+b.x)/2,my0:(a.y+b.y)/2};
   }
 },{passive:false});
 
+penLayer.addEventListener('pointermove',e=>{
+  if(e.pointerType!=='pen'&&e.pointerType!=='mouse')return;
+  if(!drawing)return;
+  e.preventDefault();
+  ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
+  const evts=e.getCoalescedEvents?e.getCoalescedEvents():[e];
+  for(const ev of evts)penMove(ev.clientX,ev.clientY,ev.pressure||0.5);
+},{passive:false});
+
+penLayer.addEventListener('pointerup',e=>{
+  if(e.pointerType!=='pen'&&e.pointerType!=='mouse')return;
+  ptrs.delete(e.pointerId);
+  penUp();
+});
+
+penLayer.addEventListener('pointercancel',e=>{
+  if(e.pointerType!=='pen'&&e.pointerType!=='mouse')return;
+  ptrs.delete(e.pointerId);
+  penUp();
+});
+
 dC.addEventListener('pointermove',e=>{
+  if(e.pointerType==='pen'||e.pointerType==='mouse') return; // handled by penLayer
   if(!ptrs.has(e.pointerId))return;
   e.preventDefault();
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
-
-  if(e.pointerType==='pen'||e.pointerType==='mouse'){
-    if(!drawing)return;
-    const evts=e.getCoalescedEvents?e.getCoalescedEvents():[e];
-    for(const ev of evts)penMove(ev.clientX,ev.clientY,ev.pressure||0.5);
-    return;
-  }
-
   // Touch finger gestures
   if(!ts)return;
   const fingers=activeTouches();
@@ -686,14 +664,9 @@ dC.addEventListener('pointermove',e=>{
 },{passive:false});
 
 dC.addEventListener('pointerup',e=>{
+  if(e.pointerType==='pen'||e.pointerType==='mouse') return; // handled by penLayer
   if(!ptrs.has(e.pointerId))return;
   e.preventDefault();
-
-  if(e.pointerType==='pen'||e.pointerType==='mouse'){
-    ptrs.delete(e.pointerId);
-    penUp();
-    return;
-  }
 
   // Finger lifted
   const x0=ts?.x0??e.clientX, y0=ts?.y0??e.clientY;
