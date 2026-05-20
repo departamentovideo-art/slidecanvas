@@ -243,18 +243,16 @@ function slideAR(){
 }
 
 function layout(){
-  const vv = window.visualViewport;
-  stageW = vv ? Math.round(vv.width) : window.innerWidth;
+  // screen.width/height are already in CSS pixels on iOS (no need to divide by dpr)
+  // In landscape: screen.width=1366, screen.height=1024 (or vice versa)
+  // Pick orientation correctly
+  const isLandscape = window.innerWidth > window.innerHeight;
+  stageW = isLandscape ? Math.max(screen.width, screen.height)
+                       : Math.min(screen.width, screen.height);
+  stageH = isLandscape ? Math.min(screen.width, screen.height)
+                       : Math.max(screen.width, screen.height);
 
-  // In iOS PWA, visualViewport excludes the status bar (32px on iPad).
-  // screen.height / devicePixelRatio gives the true full height.
-  const fullH = Math.round(screen.height / window.devicePixelRatio);
-  const vvH = vv ? Math.round(vv.height) : window.innerHeight;
-  // Use fullH only in PWA standalone mode
-  const isStandalone = window.navigator.standalone === true;
-  stageH = isStandalone ? fullH : vvH;
-
-  stage.style.width = stageW + 'px';
+  stage.style.width  = stageW + 'px';
   stage.style.height = stageH + 'px';
 
   const ar = slideAR();
@@ -269,13 +267,13 @@ function layout(){
   const w = cW(), h = cH();
   sC.width = dC.width = w;
   sC.height = dC.height = h;
-  sC.style.width = dC.style.width = slideDispW + 'px';
+  sC.style.width  = dC.style.width  = slideDispW + 'px';
   sC.style.height = dC.style.height = slideDispH + 'px';
 
-  zoomWrap.style.width = slideDispW + 'px';
+  zoomWrap.style.width  = slideDispW + 'px';
   zoomWrap.style.height = slideDispH + 'px';
-  zoomWrap.style.left = slideOffX + 'px';
-  zoomWrap.style.top = slideOffY + 'px';
+  zoomWrap.style.left   = slideOffX  + 'px';
+  zoomWrap.style.top    = slideOffY  + 'px';
 
   applyZoomTransform();
   renderCur();
