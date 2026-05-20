@@ -934,20 +934,44 @@ bgP.appendChild(fSw);
 
 /* ─── Fullscreen ─────────────────────────────────── */
 const bFs=document.getElementById('bFs');
-function toggleFS(){
+let userExitedFS=false; // true only when user explicitly pressed exit
+
+function enterFS(){
   const el=document.documentElement;
+  const req=el.requestFullscreen||el.webkitRequestFullscreen;
+  if(req) req.call(el,{navigationUI:'hide'}).catch(()=>{});
+}
+
+function toggleFS(){
   const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
-  if(isFs){(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document)}
-  else{
-    const req=el.requestFullscreen||el.webkitRequestFullscreen;
-    if(req)req.call(el,{navigationUI:'hide'}).catch(()=>{});
-    else toast('Safari: Compartir → Añadir a pantalla de inicio');
+  if(isFs){
+    userExitedFS=true;
+    (document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);
+  } else {
+    userExitedFS=false;
+    enterFS();
   }
   showUI();
 }
 bFs.addEventListener('click',toggleFS);
-document.addEventListener('fullscreenchange',()=>{bFs.textContent=document.fullscreenElement?'⊠':'⛶';layout()});
-document.addEventListener('webkitfullscreenchange',()=>{bFs.textContent=document.webkitFullscreenElement?'⊠':'⛶';layout()});
+
+function onFSChange(){
+  const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  bFs.textContent=isFs?'⊠':'⛶';
+  layout();
+  // If fullscreen was lost without user asking → re-enter after short delay
+  if(!isFs && !userExitedFS){
+    setTimeout(()=>{
+      // Only re-enter if still not in fullscreen and user hasn't explicitly exited
+      if(!document.fullscreenElement && !document.webkitFullscreenElement && !userExitedFS){
+        enterFS();
+      }
+    }, 300);
+  }
+  if(isFs) userExitedFS=false; // reset flag when successfully in fullscreen
+}
+document.addEventListener('fullscreenchange', onFSChange);
+document.addEventListener('webkitfullscreenchange', onFSChange);
 
 /* ─── Keyboard ───────────────────────────────────── */
 document.addEventListener('keydown',e=>{
