@@ -243,8 +243,11 @@ function slideAR(){
 }
 
 function layout(){
-  stageW = window.innerWidth;
-  stageH = window.innerHeight;
+  // On iPad Air 13" M4: logical viewport is 1366×1024 (devicePixelRatio=2)
+  // Use visualViewport if available as it's most accurate on iOS
+  const vv = window.visualViewport;
+  stageW = vv ? Math.round(vv.width) : window.innerWidth;
+  stageH = vv ? Math.round(vv.height) : window.innerHeight;
 
   stage.style.width = stageW + 'px';
   stage.style.height = stageH + 'px';
@@ -271,6 +274,11 @@ function layout(){
 
   applyZoomTransform();
   renderCur();
+}
+
+// Re-layout when visualViewport resizes (iOS keyboard, orientation, etc.)
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', layout);
 }
 window.addEventListener('resize',layout);
 document.addEventListener('fullscreenchange',layout);
@@ -932,21 +940,22 @@ fSw.style.cssText='background:linear-gradient(135deg,#7ab8e8,#e8c87a);display:fl
 fSw.textContent='🖼';fSw.addEventListener('click',()=>{document.getElementById('fBg').click();bgP.classList.remove('open')});
 bgP.appendChild(fSw);
 
-/* ─── Block iOS swipe-down that exits fullscreen ─────
-   iOS exits fullscreen when you swipe down from the
-   top ~50px of the screen. We intercept those touches
-   and prevent them when in fullscreen mode.           */
+/* ─── Block iOS gestures that exit fullscreen ────────
+   Prevent any touch/pointer event from triggering the
+   iOS system gesture that exits fullscreen.           */
 document.addEventListener('touchstart', e => {
   const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
-  if(!isFs) return;
-  // Block touches starting in the top 60px (where iOS gesture lives)
-  if(e.touches[0].clientY < 60) e.preventDefault();
+  if(isFs) e.preventDefault();
 }, {passive: false});
 
 document.addEventListener('touchmove', e => {
   const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
-  if(!isFs) return;
-  if(e.touches[0].clientY < 60) e.preventDefault();
+  if(isFs) e.preventDefault();
+}, {passive: false});
+
+document.addEventListener('touchend', e => {
+  const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  if(isFs) e.preventDefault();
 }, {passive: false});
 const bFs=document.getElementById('bFs');
 let userExitedFS=false; // true only when user explicitly pressed exit
