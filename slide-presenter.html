@@ -932,7 +932,22 @@ fSw.style.cssText='background:linear-gradient(135deg,#7ab8e8,#e8c87a);display:fl
 fSw.textContent='🖼';fSw.addEventListener('click',()=>{document.getElementById('fBg').click();bgP.classList.remove('open')});
 bgP.appendChild(fSw);
 
-/* ─── Fullscreen ─────────────────────────────────── */
+/* ─── Block iOS swipe-down that exits fullscreen ─────
+   iOS exits fullscreen when you swipe down from the
+   top ~50px of the screen. We intercept those touches
+   and prevent them when in fullscreen mode.           */
+document.addEventListener('touchstart', e => {
+  const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  if(!isFs) return;
+  // Block touches starting in the top 60px (where iOS gesture lives)
+  if(e.touches[0].clientY < 60) e.preventDefault();
+}, {passive: false});
+
+document.addEventListener('touchmove', e => {
+  const isFs=!!(document.fullscreenElement||document.webkitFullscreenElement);
+  if(!isFs) return;
+  if(e.touches[0].clientY < 60) e.preventDefault();
+}, {passive: false});
 const bFs=document.getElementById('bFs');
 let userExitedFS=false; // true only when user explicitly pressed exit
 
