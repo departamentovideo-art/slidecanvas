@@ -1024,7 +1024,11 @@ DEFBG.slice(0,3).forEach(c=>slides.push(mkSlide(c)));
 setTimeout(()=>{
   layout();
   setTimeout(()=>showUI(true), 200);
-  setTimeout(()=>toast(`stage:${stageW}×${stageH} | slide AR:${slideAR().toFixed(3)} | disp:${Math.round(slideDispW)}×${Math.round(slideDispH)}`), 500);
+  setTimeout(()=>{
+    const info=`stage:${stageW}×${stageH} | AR:${slideAR().toFixed(3)} | disp:${Math.round(slideDispW)}×${Math.round(slideDispH)}`;
+    document.getElementById('hint').textContent=info;
+    document.getElementById('hint').classList.remove('gone');
+  }, 600);
 }, 100);
 </script>
 </body>
