@@ -580,11 +580,9 @@ function renderLaser(){
 }
 
 /* ─── Unified pointer event handler ─────────────────
-   pointerType='pen'|'mouse' → draw
-   pointerType='touch'       → gesture (swipe/pinch)
-
-   We track all active pointers by id so we can detect
-   2-finger pinch without touch events.                */
+   pointerType='pen'   → ONLY draws, never interacts with UI
+   pointerType='mouse' → draws on canvas, clicks UI normally
+   pointerType='touch' → gestures only (swipe/pinch/tap)    */
 
 const ptrs=new Map();
 let ts=null;
@@ -592,18 +590,53 @@ let lastFingerTap={t:0,x:0,y:0};
 
 function activeTouches(){return[...ptrs.values()].filter(p=>p.type==='touch')}
 
+// Block pen from interacting with any UI element
+document.addEventListener('pointerdown', e=>{
+  if(e.pointerType!=='pen') return;
+  // If pen lands on UI, prevent the click but still draw on canvas
+  const el=document.elementFromPoint(e.clientX,e.clientY);
+  if(el && el.closest('#ui,#bgP,#loadOv')){
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+}, {capture:true, passive:false});
+
+document.addEventListener('pointerup', e=>{
+  if(e.pointerType!=='pen') return;
+  const el=document.elementFromPoint(e.clientX,e.clientY);
+  if(el && el.closest('#ui,#bgP,#loadOv')){
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+}, {capture:true, passive:false});
+
+document.addEventListener('click', e=>{
+  if(e.pointerType==='pen'){
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }
+}, {capture:true});
+
 dC.addEventListener('pointerdown',e=>{
-  if(hitUI(e))return;
   e.preventDefault();
   ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY,type:e.pointerType});
 
-  if(e.pointerType==='pen'||e.pointerType==='mouse'){
+  if(e.pointerType==='pen'){
+    // Pen always draws, regardless of where it lands
     dC.setPointerCapture(e.pointerId);
     penDown(e.clientX,e.clientY,e.pressure||0.5);
     return;
   }
 
-  // Touch finger
+  if(e.pointerType==='mouse'){
+    if(hitUI(e)) return;
+    dC.setPointerCapture(e.pointerId);
+    penDown(e.clientX,e.clientY,e.pressure||0.5);
+    return;
+  }
+
+  // Touch finger — gestures only
+  if(hitUI(e)) return;
   const fingers=activeTouches();
   if(fingers.length===1){
     ts={type:'swipe',x0:e.clientX,y0:e.clientY,
