@@ -1014,11 +1014,11 @@ function toast(msg){
 
 /* ─── Init ───────────────────────────────────────── */
 DEFBG.slice(0,3).forEach(c=>slides.push(mkSlide(c)));
-// Delay layout so iOS PWA has time to settle final viewport dimensions
 setTimeout(()=>{
   layout();
   setTimeout(()=>showUI(true), 200);
-  setTimeout(()=>toast(`${stageW}×${stageH}`), 500);
+  const vv=window.visualViewport;
+  setTimeout(()=>toast(`viewport: ${stageW}×${stageH} | vv: ${vv?Math.round(vv.width)+'×'+Math.round(vv.height):'n/a'} | inner: ${window.innerWidth}×${window.innerHeight}`), 500);
 }, 100);
 </script>
 </body>
