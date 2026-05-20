@@ -243,11 +243,16 @@ function slideAR(){
 }
 
 function layout(){
-  // On iPad Air 13" M4: logical viewport is 1366×1024 (devicePixelRatio=2)
-  // Use visualViewport if available as it's most accurate on iOS
   const vv = window.visualViewport;
   stageW = vv ? Math.round(vv.width) : window.innerWidth;
-  stageH = vv ? Math.round(vv.height) : window.innerHeight;
+
+  // In iOS PWA, visualViewport excludes the status bar (32px on iPad).
+  // screen.height / devicePixelRatio gives the true full height.
+  const fullH = Math.round(screen.height / window.devicePixelRatio);
+  const vvH = vv ? Math.round(vv.height) : window.innerHeight;
+  // Use fullH only in PWA standalone mode
+  const isStandalone = window.navigator.standalone === true;
+  stageH = isStandalone ? fullH : vvH;
 
   stage.style.width = stageW + 'px';
   stage.style.height = stageH + 'px';
@@ -276,7 +281,6 @@ function layout(){
   renderCur();
 }
 
-// Re-layout when visualViewport resizes (iOS keyboard, orientation, etc.)
 if(window.visualViewport){
   window.visualViewport.addEventListener('resize', layout);
 }
